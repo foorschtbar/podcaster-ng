@@ -10,6 +10,9 @@ class Config:
     data_dir: Path
     base_url: str
     log_level: str
+    admin_user: str = ""
+    admin_password: str = ""
+    session_secret: str = ""
 
     @property
     def db_path(self) -> Path:
@@ -19,10 +22,17 @@ class Config:
     def backup_dir(self) -> Path:
         return self.data_dir / "backups"
 
+    @property
+    def admin_configured(self) -> bool:
+        return bool(self.admin_user and self.admin_password)
+
     @classmethod
     def from_env(cls) -> "Config":
         return cls(
             data_dir=Path(os.environ.get("DATA_DIR") or "/data"),
             base_url=(os.environ.get("BASE_URL") or "").rstrip("/"),
             log_level=(os.environ.get("LOG_LEVEL") or "INFO").upper(),
+            admin_user=os.environ.get("ADMIN_USER") or "",
+            admin_password=os.environ.get("ADMIN_PASSWORD") or "",
+            session_secret=os.environ.get("SESSION_SECRET") or "",
         )

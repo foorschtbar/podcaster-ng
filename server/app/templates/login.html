@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Log in – PodcasterNG{% endblock %}
+{% block public %}
+  <h1>PodcasterNG</h1>
+  <form method="post" action="/login" class="card" autocomplete="on">
+    <input type="hidden" name="login_token" value="{{ login_token }}">
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <label>Username
+      <input name="username" autocomplete="username" autocapitalize="none" required autofocus>
+    </label>
+    <label>Password
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Log in</button>
+  </form>
+{% endblock %}
