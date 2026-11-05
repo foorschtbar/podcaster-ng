@@ -37,6 +37,7 @@ PAGES = [
     ("episodes", "Episodes"),
     ("workers", "Workers"),
     ("tasks", "Tasks"),
+    ("events", "Events"),
     ("settings", "Settings"),
 ]
 
