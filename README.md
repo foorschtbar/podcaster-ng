@@ -2,12 +2,13 @@
 
 Turns YouTube playlists into podcast feeds. The **server** coordinates and serves (feeds, files, queue, admin UI, SQLite); replaceable **workers** (yt-dlp, ffmpeg, deno) run on any network and upload finished episodes.
 
-**Status:** server skeleton plus a mobile-first admin shell behind a login with podcast and settings management. No feeds or workers yet.
+**Status:** server skeleton plus a mobile-first admin shell behind a login with podcast and settings management, public feeds and files compatible with the old Podcaster, and an import assistant. No workers or downloads yet.
 
 ## Layout
 
 | Path | Content |
 |---|---|
+| `scripts/` | `compare_feeds.py` |
 | `server/` | Python package `app` (FastAPI), `migrations/`, tests, Dockerfile |
 | `worker/`, `shared/` | placeholders |
 | `compose.yml` | server service, data bind mount `./data` |
@@ -38,9 +39,29 @@ docker exec podcaster-ng-server python -c "import urllib.request as u; print(u.u
 | `BASE_URL` | empty | public base URL used in feeds |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `ADMIN_USER`, `ADMIN_PASSWORD` | empty | admin login; if either is empty the admin UI is locked (503 "access not configured") |
+| `IMPORT_DIR` | `/import` | the import assistant may only read below this directory |
 | `SESSION_SECRET` | empty | signs session cookies; if empty a secret is generated once and stored in the `settings` table |
 
 Logs are JSON lines on stdout.
+
+## Public feeds and files
+
+Same URLs as the old Podcaster, no login:
+
+- `GET /<podcast-id>.xml` – RSS feed (only `available` episodes, newest first). The base URL is taken from Settings, then `BASE_URL`, then the request.
+- `GET /files/<podcast-id>/<file>` – `.m4a` (`audio/x-m4a`), `.jpg/.jpeg/.png/.webp` and `.chapters.json` (`application/json+chapters`) with range requests and conditional requests. Anything else, hidden names, symlinks and path tricks return 404.
+
+Files live in `data/media/<podcast-id>/`, file names as in the old project. Feed items use the file URL as GUID, a square image per episode and a `podcast:chapters` link when a chapters file exists.
+
+## Import from the old Podcaster
+
+Mount the old project read-only (uncomment the example in `compose.yml`), restart, then Settings → Import assistant. It shows a dry run first (podcasts, episodes, sizes, problems) and imports only after confirmation. It reads `config.yml` and the downloads directory (`jobs`, `baseurl`, `interval`, `*.info.json`, `*.m4a`, thumbnails, chapters, `archive.txt`; the cookie file is never read), copies the files with unchanged names into `data/media/` and records videos from `archive.txt` without files as known (`deleted`) so they are not downloaded again. The old project is never modified. The import is only possible while there are no episodes; the database is written in one transaction after all files are in place, so a failed run can simply be repeated.
+
+Compare the feeds of both instances (host names are ignored):
+
+```bash
+python3 scripts/compare_feeds.py https://old.example.org https://new.example.org abgt asot
+```
 
 ## Admin UI
 
@@ -66,6 +87,6 @@ Numbered files `server/migrations/NNNN_name.sql` are applied at startup, in orde
 The tests need `fastapi`, `pytest` and `httpx2` (see `server/requirements-dev.txt`). Without a local virtualenv, run them in a throwaway container:
 
 ```bash
-docker run --rm -v "$PWD/server:/src:ro" python:3.12-slim sh -c \
-  'cp -r /src /tmp/s && cd /tmp/s && pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
+docker run --rm -v "$PWD/server:/src/server:ro" -v "$PWD/scripts:/src/scripts:ro" python:3.12-slim sh -c \
+  'cp -r /src /tmp/s && cd /tmp/s/server && pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
 ```

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podcast="https://podcastindex.org/namespace/1.0" version="2.0">
+<channel>
+<title>ABGT &amp; Friends</title>
+<link>https://www.youtube.com/playlist?list=PL1&amp;x=2</link>
+<image>
+    <url>https://img.example.org/big.jpg?a=1&amp;b=2</url>
+    <title>ABGT &amp; Friends</title>
+    <link>https://www.youtube.com/playlist?list=PL1&amp;x=2</link>
+</image>
+<language>en</language>
+<lastBuildDate>Thu, 01 Feb 2024 10:00:00 +0000</lastBuildDate>
+<description>Above &amp; Beyond &lt;weekly&gt;</description>
+<itunes:subtitle>ABGT &amp; Friends</itunes:subtitle>
+<itunes:author>Anjunabeats</itunes:author>
+<itunes:summary>Above &amp; Beyond &lt;weekly&gt;</itunes:summary>
+<itunes:image href="https://img.example.org/big.jpg?a=1&amp;b=2" />
+<itunes:explicit>no</itunes:explicit>
+<itunes:category text="Music"></itunes:category>
+<itunes:owner>
+  <itunes:name>Anjunabeats</itunes:name>
+</itunes:owner>
+<item>
+<title>No artwork</title>
+<description></description>
+<itunes:author>Anjunabeats</itunes:author>
+<itunes:subtitle>No artwork</itunes:subtitle>
+<itunes:summary></itunes:summary>
+<itunes:image href="https://img.example.org/big.jpg?a=1&amp;b=2" />
+<enclosure url="https://pod.example.org/files/abgt/No%20artwork.m4a" length="5" type="audio/x-m4a" />
+<guid>https://pod.example.org/files/abgt/No%20artwork.m4a</guid>
+<itunes:duration>0</itunes:duration>
+</item>
+<item>
+<title>Episode 101</title>
+<description>plain</description>
+<itunes:author>Above &amp; Beyond</itunes:author>
+<itunes:subtitle>Episode 101</itunes:subtitle>
+<itunes:summary>plain</itunes:summary>
+<itunes:image href="https://pod.example.org/files/abgt/Episode%20101.jpg" />
+<enclosure url="https://pod.example.org/files/abgt/Episode%20101.m4a" length="2000" type="audio/x-m4a" />
+<guid>https://pod.example.org/files/abgt/Episode%20101.m4a</guid>
+<pubDate>Fri, 12 Jan 2024 00:00:00 +0000</pubDate>
+<itunes:duration>1800</itunes:duration>
+</item>
+<item>
+<title>Episode 100 - Live &amp; Direct</title>
+<description>Tracklist &lt;b&gt;bold&lt;/b&gt; &amp; ]]&gt; tricky  control</description>
+<itunes:author>Above &amp; Beyond</itunes:author>
+<itunes:subtitle>Episode 100 - Live &amp; Direct</itunes:subtitle>
+<itunes:summary>Tracklist &lt;b&gt;bold&lt;/b&gt; &amp; ]]&gt; tricky  control</itunes:summary>
+<itunes:image href="https://pod.example.org/files/abgt/Episode%20100%20-%20Live%20%26%20Direct.square.jpg" />
+<podcast:chapters url="https://pod.example.org/files/abgt/Episode%20100%20-%20Live%20%26%20Direct.chapters.json" type="application/json+chapters" />
+<enclosure url="https://pod.example.org/files/abgt/Episode%20100%20-%20Live%20%26%20Direct.m4a" length="123456" type="audio/x-m4a" />
+<guid>https://pod.example.org/files/abgt/Episode%20100%20-%20Live%20%26%20Direct.m4a</guid>
+<pubDate>Fri, 05 Jan 2024 00:00:00 +0000</pubDate>
+<itunes:duration>3600</itunes:duration>
+</item>
+</channel>
+</rss>

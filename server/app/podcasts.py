@@ -51,6 +51,9 @@ def validate(form, defaults: dict, *, creating: bool) -> tuple[dict, dict]:
         errors["name"] = "is required"
     elif len(data["name"]) > 200:
         errors["name"] = "must be at most 200 characters"
+    data["author"] = text("author")
+    if len(data["author"]) > 200:
+        errors["author"] = "must be at most 200 characters"
     data["description"] = text("description")
     if len(data["description"]) > 4000:
         errors["description"] = "must be at most 4000 characters"

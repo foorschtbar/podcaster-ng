@@ -3,7 +3,7 @@
 from fastapi import Depends, Path, Request
 from fastapi.responses import HTMLResponse
 
-from . import podcasts, settings
+from . import episodes, podcasts, settings
 from .web import Session, db, env_defaults, protected, redirect, render, require_session
 
 FLASH = {
@@ -14,7 +14,7 @@ FLASH = {
     "deleted": "Podcast deleted.",
 }
 SLUG = Path(pattern=r"^[a-z0-9-]{1,64}$")
-FORM_KEYS = ["id", "name", "description", "playlist_url", "image_url", "scan_interval_min", "scan_depth",
+FORM_KEYS = ["id", "name", "author", "description", "playlist_url", "image_url", "scan_interval_min", "scan_depth",
              "pause_min_s", "pause_max_s", "downloads_per_hour", "keep_last", "max_age_days"]
 
 
@@ -38,9 +38,10 @@ def _form_page(request, session, *, creating: bool, values: dict, errors: dict, 
 def podcast_list(request: Request, msg: str | None = None, session: Session = Depends(require_session)):
     with db(request) as conn:
         items = podcasts.list_all(conn)
+        stats = episodes.stats_by_podcast(conn)
         defaults = settings.get_all(conn, env_defaults(request))
     return render(request, "podcasts.html", session, active="podcasts", title="Podcasts", podcasts=items,
-                  defaults=defaults, flash=FLASH.get(msg or ""))
+                  stats=stats, defaults=defaults, flash=FLASH.get(msg or ""))
 
 
 @protected.get("/podcasts/new", response_class=HTMLResponse, include_in_schema=False)
@@ -113,17 +114,24 @@ def podcast_resume(request: Request, podcast_id: str = SLUG, session: Session = 
 def podcast_delete_confirm(request: Request, podcast_id: str = SLUG, session: Session = Depends(require_session)):
     with db(request) as conn:
         row = podcasts.get(conn, podcast_id)
+        n_episodes = episodes.count_for(conn, podcast_id) if row else 0
     if not row:
         return _not_found(request, session)
-    return render(request, "podcast_delete.html", session, active="podcasts", title="Delete podcast", p=row)
+    return render(request, "podcast_delete.html", session, active="podcasts", title="Delete podcast", p=row,
+                  n_episodes=n_episodes)
 
 
 @protected.post("/podcasts/{podcast_id}/delete", include_in_schema=False)
 def podcast_delete(request: Request, podcast_id: str = SLUG, session: Session = Depends(require_session)):
-    # Step 04 adds the check for existing episodes and files here.
     with db(request) as conn:
-        if not podcasts.delete(conn, podcast_id):
+        row = podcasts.get(conn, podcast_id)
+        if not row:
             return _not_found(request, session)
+        n_episodes = episodes.count_for(conn, podcast_id)
+        if n_episodes:  # refuse; episode and file removal comes with the episode management
+            return render(request, "podcast_delete.html", session, status_code=409, active="podcasts",
+                          title="Delete podcast", p=row, n_episodes=n_episodes)
+        podcasts.delete(conn, podcast_id)
     return redirect("/podcasts?msg=deleted")
 
 

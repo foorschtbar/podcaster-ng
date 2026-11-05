@@ -18,6 +18,17 @@ from .db import connect
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
+def human_size(n) -> str:
+    n = float(n or 0)
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{int(n)} B" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return ""
+
+
+templates.env.filters["human_size"] = human_size
+
 COOKIE = "pn_session"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 PAGES = [

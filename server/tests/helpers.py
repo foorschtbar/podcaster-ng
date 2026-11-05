@@ -9,9 +9,10 @@ from app.main import create_app
 USER, PASSWORD = "admin", "s3cret-pw"
 
 
-def make_config(tmp_path, user=USER, password=PASSWORD, secret=""):
-    return Config(data_dir=tmp_path, base_url="", log_level="INFO",
-                  admin_user=user, admin_password=password, session_secret=secret)
+def make_config(tmp_path, user=USER, password=PASSWORD, secret="", base_url="", import_dir=None):
+    kw = {"import_dir": import_dir} if import_dir else {}
+    return Config(data_dir=tmp_path, base_url=base_url, log_level="INFO",
+                  admin_user=user, admin_password=password, session_secret=secret, **kw)
 
 
 def make_client(tmp_path, **kw):

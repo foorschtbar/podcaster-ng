@@ -2,6 +2,13 @@
 {% block title %}Delete podcast – PodcasterNG{% endblock %}
 {% block content %}
   <h1>Delete podcast?</h1>
+  {% if n_episodes %}
+  <div class="card">
+    <p class="error" role="alert"><strong>{{ p.name }}</strong> (<code>{{ p.id }}</code>) cannot be deleted: it has {{ n_episodes }} episode record(s).</p>
+    <p class="muted">Removing episodes and their files will be possible in the episode management. Until then the podcast can be paused instead.</p>
+    <p class="actions"><a class="btn secondary" href="/podcasts/{{ p.id }}">Back</a></p>
+  </div>
+  {% else %}
   <div class="card">
     <p><strong>{{ p.name }}</strong> (<code>{{ p.id }}</code>) will be removed from the database.</p>
     <p class="muted">Its public feed URL will stop working. This cannot be undone.</p>
@@ -11,4 +18,5 @@
       <a class="btn secondary" href="/podcasts/{{ p.id }}">Cancel</a>
     </form>
   </div>
+  {% endif %}
 {% endblock %}

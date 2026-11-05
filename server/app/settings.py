@@ -127,7 +127,10 @@ def validate(form, env_defaults: dict | None = None) -> tuple[dict, dict]:
 
 
 def save(conn: sqlite3.Connection, changes: dict) -> None:
-    conn.execute("BEGIN")
+    """Store changes; joins a transaction the caller already opened, otherwise uses its own."""
+    own = not conn.in_transaction
+    if own:
+        conn.execute("BEGIN")
     try:
         for key, value in changes.items():
             if value is None:
@@ -135,7 +138,9 @@ def save(conn: sqlite3.Connection, changes: dict) -> None:
             else:
                 conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
                              "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value)))
-        conn.execute("COMMIT")
+        if own:
+            conn.execute("COMMIT")
     except Exception:
-        conn.execute("ROLLBACK")
+        if own:
+            conn.execute("ROLLBACK")
         raise

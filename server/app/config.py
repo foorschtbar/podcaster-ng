@@ -13,10 +13,15 @@ class Config:
     admin_user: str = ""
     admin_password: str = ""
     session_secret: str = ""
+    import_dir: Path = Path("/import")
 
     @property
     def db_path(self) -> Path:
         return self.data_dir / "podcaster.db"
+
+    @property
+    def media_dir(self) -> Path:
+        return self.data_dir / "media"
 
     @property
     def backup_dir(self) -> Path:
@@ -35,4 +40,5 @@ class Config:
             admin_user=os.environ.get("ADMIN_USER") or "",
             admin_password=os.environ.get("ADMIN_PASSWORD") or "",
             session_secret=os.environ.get("SESSION_SECRET") or "",
+            import_dir=Path(os.environ.get("IMPORT_DIR") or "/import"),
         )

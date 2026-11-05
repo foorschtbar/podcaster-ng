@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Import assistant – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>Import assistant</h1>
+  <p class="muted">Takes over podcasts, episodes and known videos from the old Podcaster. The old files are only read, never changed.</p>
+  {% include "_import_status.html" %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+  {% if has_episodes and not job.running %}
+    <div class="card">
+      <p><strong>The import is blocked.</strong> The database already contains episodes, and the import is only possible into an empty one.</p>
+    </div>
+  {% elif not job.running %}
+    <form method="post" action="/settings/import/preview" class="card">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+      <label>Path to the old <code>config.yml</code>
+        <input name="config_file" value="{{ config_file }}" autocomplete="off" required>
+      </label>
+      <label>Path to the old downloads directory
+        <input name="downloads_dir" value="{{ downloads_dir }}" autocomplete="off" required>
+        <small class="muted">Both paths must be below <code>{{ import_root }}</code>, where the old project is mounted read-only (see <code>compose.yml</code>).</small>
+      </label>
+      <button type="submit">Check (dry run)</button>
+    </form>
+  {% endif %}
+
+  {% if plan %}
+    <h2>Dry run</h2>
+    <div class="card">
+      <p><strong>{{ plan.podcasts | length }}</strong> podcast(s), <strong>{{ plan.episode_count }}</strong> episode(s) with files
+         ({{ plan.total_size | human_size }}), <strong>{{ plan.known_count }}</strong> known video(s) without files.</p>
+      {% if plan.base_url %}<p class="small muted">Base URL in the old config: <code>{{ plan.base_url }}</code></p>{% endif %}
+      {% if plan.interval_min %}<p class="small muted">Scan interval in the old config: {{ plan.interval_min }} min (becomes the default).</p>{% endif %}
+      {% for p in plan.podcasts %}
+        <div class="item">
+          <strong>{{ p.name }}</strong> <code>{{ p.id }}</code>
+          <span class="badge {{ 'off' if p.exists else 'on' }}">{{ 'exists, episodes are added' if p.exists else 'new' }}</span>
+          <div class="muted small">{{ p.episodes | length }} episodes ({{ p.size | human_size }}), {{ p.known_ids | length }} known only
+            {% if p.no_square %}· {{ p.no_square }} without square thumbnail (original is used){% endif %}
+            {% if p.chapters_to_generate %}· {{ p.chapters_to_generate }} chapters file(s) will be generated{% endif %}</div>
+        </div>
+      {% endfor %}
+    </div>
+    {% if plan.problems %}
+      <h2>Problems ({{ plan.problems_total }})</h2>
+      <ul class="small">{% for p in plan.problems %}<li>{{ p }}</li>{% endfor %}</ul>
+    {% endif %}
+    <form method="post" action="/settings/import/run" class="card">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+      <input type="hidden" name="config_file" value="{{ config_file }}">
+      <input type="hidden" name="downloads_dir" value="{{ downloads_dir }}">
+      {% if plan.base_url %}
+      <label class="check"><input type="checkbox" name="take_base_url" value="1"> Take over the base URL <code>{{ plan.base_url }}</code></label>
+      <p class="small muted">Leave this off while the old Podcaster still serves that address, otherwise the new feeds point to the old server. Without it the feeds use the address they are requested under, or the base URL from Settings.</p>
+      {% endif %}
+      <button type="submit">Import now</button>
+    </form>
+  {% endif %}
+  <p><a class="btn secondary" href="/settings">Back to settings</a></p>
+{% endblock %}

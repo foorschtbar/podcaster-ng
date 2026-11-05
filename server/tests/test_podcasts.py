@@ -230,3 +230,25 @@ def test_podcasts_persist_across_restart(tmp_path):
     with make_client(tmp_path) as b:
         b.cookies.set("pn_session", cookie)
         assert 'name="keep_last" type="text" value="12"' in b.get("/podcasts/abgt").text
+
+
+def test_delete_refused_while_episodes_exist(c, tmp_path):
+    from app import episodes
+    post(c, "/podcasts", **valid())
+    conn = connect(tmp_path / "podcaster.db")
+    episodes.insert(conn, podcast_id="abgt", video_id="v1", title="T", audio_file="t.m4a")
+    episodes.insert(conn, podcast_id="abgt", video_id="v2", state="deleted")  # known-only rows count too
+    conn.close()
+    page = c.get("/podcasts/abgt/delete").text
+    assert "cannot be deleted" in page and "2 episode record(s)" in page and "Delete permanently" not in page
+    r = post(c, "/podcasts/abgt/delete")
+    assert r.status_code == 409 and "cannot be deleted" in r.text
+    assert count(tmp_path) == 1
+    assert "1 episodes" in c.get("/podcasts").text and "1 hidden/known" in c.get("/podcasts").text
+
+
+def test_author_field(c):
+    post(c, "/podcasts", **valid(author="Anjunabeats"))
+    assert 'name="author" type="text" value="Anjunabeats"' in c.get("/podcasts/abgt").text
+    r = post(c, "/podcasts/abgt", **valid(author="x" * 201))
+    assert r.status_code == 422 and "Author must be at most 200" in r.text

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podcast="https://podcastindex.org/namespace/1.0" version="2.0">
+<channel>
+<title>{{ channel.title }}</title>
+<link>{{ channel.link }}</link>
+{% if channel.image %}
+<image>
+    <url>{{ channel.image }}</url>
+    <title>{{ channel.title }}</title>
+    <link>{{ channel.link }}</link>
+</image>
+{% endif %}
+<language>en</language>
+<lastBuildDate>{{ channel.last_build_date }}</lastBuildDate>
+<description>{{ channel.description }}</description>
+<itunes:subtitle>{{ channel.title }}</itunes:subtitle>
+<itunes:author>{{ channel.author }}</itunes:author>
+<itunes:summary>{{ channel.description }}</itunes:summary>
+{% if channel.image %}
+<itunes:image href="{{ channel.image }}" />
+{% endif %}
+<itunes:explicit>no</itunes:explicit>
+<itunes:category text="Music"></itunes:category>
+<itunes:owner>
+  <itunes:name>{{ channel.author }}</itunes:name>
+</itunes:owner>
+{% for item in items %}
+<item>
+<title>{{ item.title }}</title>
+<description>{{ item.description }}</description>
+<itunes:author>{{ item.author }}</itunes:author>
+<itunes:subtitle>{{ item.title }}</itunes:subtitle>
+<itunes:summary>{{ item.description }}</itunes:summary>
+{% if item.image %}
+<itunes:image href="{{ item.image }}" />
+{% endif %}
+{% if item.chapters_url %}
+<podcast:chapters url="{{ item.chapters_url }}" type="{{ chapters_type }}" />
+{% endif %}
+<enclosure url="{{ item.url }}" length="{{ item.length }}" type="{{ item.type }}" />
+<guid>{{ item.guid }}</guid>
+{% if item.pub_date %}
+<pubDate>{{ item.pub_date }}</pubDate>
+{% endif %}
+<itunes:duration>{{ item.duration }}</itunes:duration>
+</item>
+{% endfor %}
+</channel>
+</rss>

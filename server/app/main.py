@@ -11,8 +11,10 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .auth import LoginLimiter, load_session_secret
 from .config import Config
+from .importer import ImportJob
 from .db import connect
 from .migrations import migrate
+from .public import router as public_router
 from .routes import router as admin_router
 from .web import CsrfError, LoginRequired, NotConfigured, locked_response
 
@@ -41,6 +43,7 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.config = config
     app.state.limiter = limiter or LoginLimiter()
+    app.state.import_job = ImportJob()
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -80,5 +83,6 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
         return {"status": "ok", "version": __version__}
 
     app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
+    app.include_router(public_router)
     app.include_router(admin_router)
     return app

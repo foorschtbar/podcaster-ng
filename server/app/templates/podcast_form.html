@@ -12,6 +12,7 @@
       <p class="muted small">ID (slug, fixed): <code>{{ podcast_id }}</code></p>
     {% endif %}
     {{ field('name', 'Name', v.name, errors.name, required=True) }}
+    {{ field('author', 'Author', v.author, errors.author, 'Shown as the feed author. Empty: the podcast name.') }}
     <label>Description
       <textarea name="description" rows="3">{{ v.description }}</textarea>
       {% if errors.description %}<small class="error">Description {{ errors.description }}</small>{% endif %}

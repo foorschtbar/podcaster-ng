@@ -12,6 +12,8 @@
       <span class="badge {{ 'on' if p.active else 'off' }}">{{ 'active' if p.active else 'paused' }}</span>
     </div>
     <div class="muted small"><code>{{ p.id }}</code> · scan every {{ p.scan_interval_min or defaults.scan_interval_min }} min · last {{ p.scan_depth }} videos</div>
+    {% set st = stats.get(p.id) %}
+    <div class="muted small">{% if st %}{{ st.available }} episodes · {{ st.size | human_size }}{% if st.total != st.available %} · {{ st.total - st.available }} hidden/known{% endif %}{% else %}No episodes yet{% endif %} · <a href="/{{ p.id }}.xml">feed</a></div>
     <div class="actions">
       <a class="btn secondary" href="/podcasts/{{ p.id }}">Edit</a>
       <form method="post" action="/podcasts/{{ p.id }}/{{ 'pause' if p.active else 'resume' }}">

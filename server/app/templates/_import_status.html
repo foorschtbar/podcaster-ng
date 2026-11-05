@@ -1,0 +1,10 @@
+<div id="import-status"{% if job.running %} hx-get="/settings/import/status" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+{% if job.state == 'running' %}
+  <p role="status">Import running: {{ job.done_bytes | human_size }} of {{ job.total_bytes | human_size }} copied.</p>
+  <progress max="{{ job.total_bytes or 1 }}" value="{{ job.done_bytes }}"></progress>
+{% elif job.state == 'done' %}
+  <p class="notice" role="status">{{ job.message }} <a href="/podcasts">Show podcasts</a></p>
+{% elif job.state == 'failed' %}
+  <p class="error" role="alert">{{ job.message }}</p>
+{% endif %}
+</div>

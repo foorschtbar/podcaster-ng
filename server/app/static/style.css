@@ -92,3 +92,6 @@ label.check input { width: auto; margin: 0; }
 .badge { font-size: .75rem; padding: .1rem .5rem; border-radius: 1rem; border: 1px solid var(--line); white-space: nowrap; }
 .badge.on { color: var(--accent); border-color: var(--accent); }
 .badge.off { color: var(--muted); }
+
+progress { width: 100%; }
+ul.small { padding-left: 1.2rem; }
