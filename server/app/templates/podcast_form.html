@@ -39,6 +39,9 @@
     <button type="submit">{{ 'Create podcast' if creating else 'Save' }}</button>
   </form>
   {% if not creating %}
+  <h2>Retention</h2>
+  <p class="small">{% if retention_plan.candidates %}With the current rules a run would delete <strong>{{ retention_plan.candidates | length }}</strong> episode(s) and free <strong>{{ retention_plan.bytes | human_size }}</strong>.{% elif retention_plan.keep_last or retention_plan.max_age_days %}With the current rules nothing would be deleted.{% else %}No retention rule: all episodes are kept.{% endif %}
+    <a href="/retention?podcast={{ podcast_id }}">Preview and run…</a> · <a href="/episodes?podcast={{ podcast_id }}">All episodes</a></p>
   <h2>Newest episodes</h2>
   {% if not recent %}<p class="muted">No episodes with files yet.</p>{% endif %}
   {% for e in recent %}

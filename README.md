@@ -142,6 +142,24 @@ Stale staging directories (finished or abandoned attempts, or untouched for 12 h
 
 Behind a reverse proxy, the maximum request body size has to be at least the upload limit (default 1024 MB), and its timeouts have to allow a slow upload.
 
+## Episodes and retention
+
+- **Episodes** (admin UI): list with filter by podcast and state, per-podcast totals (in feed / hidden / deleted, disk space) and a
+  detail page with the files and their sizes. Actions: **hide / show** (state `hidden` leaves the feed at once, files stay),
+  **delete files** (state `deleted`, row kept, never downloaded again by a scan) and **re-download** (deletes the files and queues
+  a new download task; the episode comes back through the normal worker pipeline, normally with the same file name). Deleting and
+  re-downloading go through a confirmation page.
+- **Retention**: per podcast *keep the last N* and/or *delete episodes older than X days* (podcast value, else the default in
+  Settings; empty = off). The **Retention** page shows a preview (what would go, how much space it frees) and has *run now*; the same
+  preview is on the podcast page. Only files are removed (m4a, images, chapters, `info.json`); the row stays as `deleted`, so scans
+  skip it and the hit statistics keep their history.
+- Safety: the newest episode of a podcast is never deleted; a run deletes at most *retention_max_per_run* episodes (default 25, oldest
+  first, shared by all podcasts; the rest follows in the next run); every deleted episode is logged (visible on the Retention page and
+  the episode).
+- The **nightly run** is off by default (Settings: *Delete old episodes automatically*, time in UTC, default 03:45) and runs once a
+  day from the scheduler. Rows are changed before the files are unlinked, so a failure leaves at worst a stray file, never a feed
+  entry without a file.
+
 ## Statistics and dashboard
 
 Anonymous daily counters in `hits_daily` (day, podcast, episode, kind, app group, count, bytes). No IP addresses and no raw user agents are stored; the user agent is only mapped to an app group (table `RULES` in `server/app/app_groups.py`: Apple Podcasts, Overcast, Pocket Casts, Spotify, …, Bots, Browsers, Other).

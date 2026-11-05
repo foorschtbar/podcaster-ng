@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Retention – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>Retention</h1>
+  {% if flash %}<p class="notice" role="status">{{ flash }}</p>{% endif %}
+  <p class="muted small">
+    Automatic deletion is <strong>{{ 'on' if v.retention_enabled else 'off' }}</strong>{% if v.retention_enabled %}, every night after {{ v.retention_time }} UTC{% endif %}.
+    At most {{ v.retention_max_per_run }} episodes per run; the newest episode of a podcast is never deleted. Only files are removed; the episodes stay known and are not downloaded again.
+    Rules are set on each podcast (<em>Keep last episodes</em>, <em>Delete episodes older than</em>) and default to the <a href="/settings">settings</a>; settings switch the nightly run on or off.
+  </p>
+  <h2>Preview</h2>
+  <p>{% if to_delete %}A run now would delete the files of <strong>{{ to_delete }}</strong> episode(s) and free <strong>{{ to_free | human_size }}</strong>.{% else %}A run now would delete nothing.{% endif %}</p>
+  {% for p in plans %}
+  <article class="card item">
+    <div class="item-head"><a href="/podcasts/{{ p.podcast_id }}"><strong>{{ p.name }}</strong></a>
+      <span class="badge {{ 'warn' if p.candidates else 'off' }}">{{ p.candidates | length }} to delete</span></div>
+    <div class="muted small">
+      {% if p.keep_last or p.max_age_days %}Rule: {% if p.keep_last %}keep the last {{ p.keep_last }}{% endif %}{% if p.keep_last and p.max_age_days %}, {% endif %}{% if p.max_age_days %}delete older than {{ p.max_age_days }} days{% endif %}{% else %}No rule: everything is kept{% endif %}
+      · {{ p.total }} episode(s) with files{% if p.candidates %} · frees {{ p.bytes | human_size }}{% endif %}{% if p.capped %} · {{ p.capped }} more are over the per-run limit{% endif %}
+    </div>
+    {% if p.candidates %}
+    <ul class="plain small">
+      {% for c in p.candidates %}<li><a href="/episodes/{{ p.podcast_id }}/{{ c.video_id }}">{{ c.title or c.video_id }}</a> <span class="muted">· {{ c.day or '–' }} · {{ c.size_bytes | human_size }} · {{ reasons[c.reason] }}</span></li>{% endfor %}
+    </ul>
+    {% endif %}
+  </article>
+  {% endfor %}
+  {% if to_delete %}
+  <form method="post" action="/retention/run" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+    <input type="hidden" name="podcast" value="{{ podcast or '' }}">
+    <button type="submit" class="danger">Delete these {{ to_delete }} episode(s)' files now</button>
+  </form>
+  {% endif %}
+  <h2>Log</h2>
+  {% if not log %}<p class="muted">Nothing deleted yet.</p>{% endif %}
+  <ul class="plain small">
+  {% for l in log %}<li>{{ l.at }} · <a href="/episodes/{{ l.podcast_id }}/{{ l.video_id }}">{{ l.title or l.video_id }}</a> <span class="muted">· {{ l.podcast_name or l.podcast_id }} · {{ reasons.get(l.reason, l.reason) }} · {{ l.files }} file(s), {{ l.bytes | human_size }}</span></li>{% endfor %}
+  </ul>
+{% endblock %}

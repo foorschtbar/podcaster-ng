@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ e.title or e.video_id }} – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>{{ e.title or e.video_id }} <span class="badge {{ 'on' if e.state == 'available' else ('warn' if e.state == 'hidden' else 'off') }}">{{ e.state }}</span></h1>
+  {% if flash %}<p class="notice" role="status">{{ flash }}</p>{% endif %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <div class="card">
+    <dl class="facts">
+      <dt>Podcast</dt><dd><a href="/episodes?podcast={{ e.podcast_id }}">{{ podcast.name if podcast else e.podcast_id }}</a></dd>
+      <dt>Video</dt><dd><code>{{ e.video_id }}</code></dd>
+      <dt>Published</dt><dd>{{ e.published_at or '–' }}</dd>
+      <dt>Duration</dt><dd>{% if e.duration_s %}{{ e.duration_s // 60 }} min {{ e.duration_s % 60 }} s{% else %}–{% endif %}</dd>
+      <dt>Size</dt><dd>{{ e.size_bytes | human_size }}</dd>
+      {% if task %}<dt>Download task</dt><dd><a href="/tasks/{{ task.id }}">#{{ task.id }}</a> ({{ task.state }})</dd>{% endif %}
+    </dl>
+    <div class="actions">
+      {% if e.state == 'available' %}
+      <form method="post" action="/episodes/{{ e.podcast_id }}/{{ e.video_id }}/hide"><input type="hidden" name="csrf_token" value="{{ session.csrf }}"><button type="submit" class="secondary">Hide from feed</button></form>
+      {% elif e.state == 'hidden' %}
+      <form method="post" action="/episodes/{{ e.podcast_id }}/{{ e.video_id }}/unhide"><input type="hidden" name="csrf_token" value="{{ session.csrf }}"><button type="submit" class="secondary">Show in feed</button></form>
+      {% endif %}
+      {% if e.state != 'deleted' %}<a class="btn danger" href="/episodes/{{ e.podcast_id }}/{{ e.video_id }}/confirm?action=delete">Delete files…</a>{% endif %}
+      <a class="btn secondary" href="/episodes/{{ e.podcast_id }}/{{ e.video_id }}/confirm?action=redownload">Re-download…</a>
+    </div>
+  </div>
+  <h2>Files</h2>
+  {% if not files %}<p class="muted">No files{% if e.state == 'deleted' %} (deleted){% endif %}.</p>{% endif %}
+  <ul class="plain small">
+  {% for f in files %}<li><span class="badge off">{{ f.role }}</span> <code>{{ f.name }}</code> · {% if f.size is none %}<strong>missing on disk</strong>{% else %}{{ f.size | human_size }}{% endif %}</li>{% endfor %}
+  </ul>
+  {% if log %}
+  <h2>Deleted</h2>
+  <ul class="plain small">
+  {% for l in log %}<li>{{ l.at }} · {{ reasons.get(l.reason, l.reason) }} · {{ l.files }} file(s), {{ l.bytes | human_size }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <p><a class="btn secondary" href="/episodes?podcast={{ e.podcast_id }}">Back to episodes</a></p>
+{% endblock %}

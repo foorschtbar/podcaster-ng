@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Confirm – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>{{ 'Delete the files' if action == 'delete' else 'Re-download' }}</h1>
+  <div class="card">
+    <p><strong>{{ e.title or e.video_id }}</strong></p>
+    {% if action == 'delete' %}
+    <p>The audio, images, chapters and metadata files of this episode ({{ e.size_bytes | human_size }}) are removed from the disk and the episode leaves the feed. The episode stays in the list as <em>deleted</em> and is never downloaded again by a scan. Statistics are kept.</p>
+    {% else %}
+    <p>The current files ({{ e.size_bytes | human_size }}) are removed and a new download task is queued. The episode is out of the feed until the download is done.</p>
+    {% endif %}
+    {% if files %}<ul class="plain small">{% for f in files %}<li><code>{{ f.name }}</code></li>{% endfor %}</ul>{% endif %}
+    <form method="post" action="/episodes/{{ e.podcast_id }}/{{ e.video_id }}/{{ action }}" class="actions">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+      <button type="submit" class="danger">{{ 'Delete files' if action == 'delete' else 'Delete files and download again' }}</button>
+      <a class="btn secondary" href="/episodes/{{ e.podcast_id }}/{{ e.video_id }}">Cancel</a>
+    </form>
+  </div>
+{% endblock %}

@@ -3,7 +3,7 @@
 from fastapi import Depends, Path, Request
 from fastapi.responses import HTMLResponse
 
-from . import episodes, podcasts, queue, settings
+from . import episodes, podcasts, queue, retention, settings
 from .web import Session, db, env_defaults, protected, redirect, render, require_session
 
 FLASH = {
@@ -32,9 +32,10 @@ def _form_page(request, session, *, creating: bool, values: dict, errors: dict, 
     with db(request) as conn:
         defaults = settings.get_all(conn, env_defaults(request))
         recent = episodes.recent(conn, podcast_id, 10) if podcast_id else []
+        retention_plan = retention.plan(conn, defaults, podcast_id)[0] if podcast_id and podcasts.get(conn, podcast_id) else None
     return render(request, "podcast_form.html", session, status_code=status_code, active="podcasts",
                   title="New podcast" if creating else "Edit podcast", creating=creating, v=values,
-                  errors=errors, defaults=defaults, podcast_id=podcast_id, recent=recent)
+                  errors=errors, defaults=defaults, podcast_id=podcast_id, recent=recent, retention_plan=retention_plan)
 
 
 @protected.get("/podcasts", response_class=HTMLResponse, include_in_schema=False)

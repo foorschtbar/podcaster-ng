@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Episodes – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>Episodes</h1>
+  <p><a class="btn secondary" href="/retention">Retention…</a></p>
+  <div class="card">
+    <table>
+      <thead><tr><th scope="col">Podcast</th><th scope="col">In feed</th><th scope="col">Hidden</th><th scope="col">Deleted</th><th scope="col">Size</th></tr></thead>
+      <tbody>
+      {% for t in totals %}
+        <tr><th scope="row"><a href="/episodes?podcast={{ t.id }}">{{ t.name }}</a></th><td>{{ t.available }}</td><td>{{ t.hidden }}</td><td>{{ t.deleted }}</td><td>{{ t.size | human_size }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form method="get" action="/episodes" class="card filters">
+    <label>Podcast
+      <select name="podcast"><option value="">All</option>{% for t in totals %}<option value="{{ t.id }}"{% if t.id == podcast %} selected{% endif %}>{{ t.name }}</option>{% endfor %}</select>
+    </label>
+    <label>State
+      <select name="state"><option value="">All</option>{% for s in states %}<option value="{{ s }}"{% if s == state %} selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    </label>
+    <button type="submit">Filter</button>
+  </form>
+  {% if not rows %}<p class="muted">No episodes{% if podcast or state %} match the filter{% endif %}.</p>{% endif %}
+  {% for e in rows %}
+  <article class="card item">
+    <div class="item-head">
+      <a href="/episodes/{{ e.podcast_id }}/{{ e.video_id }}"><strong>{{ e.title or e.video_id }}</strong></a>
+      <span class="badge {{ 'on' if e.state == 'available' else ('warn' if e.state == 'hidden' else 'off') }}">{{ e.state }}</span>
+    </div>
+    <div class="muted small">{{ e.podcast_name }} · {{ e.published_at or '–' }}{% if e.duration_s %} · {{ e.duration_s // 60 }} min{% endif %}{% if e.state != 'deleted' %} · {{ e.size_bytes | human_size }}{% endif %}</div>
+  </article>
+  {% endfor %}
+  {% if page_count > 1 %}
+  <p class="actions">
+    {% if page > 1 %}<a class="btn secondary" href="/episodes?{{ query }}{{ '&' if query }}page={{ page - 1 }}">← Newer</a>{% endif %}
+    <span class="muted small">Page {{ page }} of {{ page_count }} ({{ total }} episodes)</span>
+    {% if page < page_count %}<a class="btn secondary" href="/episodes?{{ query }}{{ '&' if query }}page={{ page + 1 }}">Older →</a>{% endif %}
+  </p>
+  {% endif %}
+{% endblock %}

@@ -665,3 +665,29 @@ def prune(conn: sqlite3.Connection, now: datetime | None = None) -> int:
     cutoff = ts((now or utcnow()) - timedelta(days=SCAN_RETENTION_DAYS))
     return conn.execute("DELETE FROM tasks WHERE type = 'scan' AND state IN ('done', 'closed') AND finished_at < ?",
                         (cutoff,)).rowcount
+
+
+def requeue_download(conn: sqlite3.Connection, podcast_id: str, video_id: str, title: str = "",
+                     now: datetime | None = None) -> int:
+    """Queue a fresh download for a video that has been fetched (or tried) before. Returns the task id.
+
+    There is one download task per video, so a finished or closed one is reused with a clean slate.
+    Raises BadState if the download is still open.
+    """
+    now = now or utcnow()
+    with transaction(conn):
+        task = conn.execute("SELECT * FROM tasks WHERE type = 'download' AND podcast_id = ? AND video_id = ?",
+                            (podcast_id, video_id)).fetchone()
+        if task is None:
+            cur = conn.execute("INSERT INTO tasks (type, podcast_id, video_id, title, created_at, updated_at) "
+                               "VALUES ('download', ?, ?, ?, ?, ?)", (podcast_id, video_id, title, ts(now), ts(now)))
+            return cur.lastrowid
+        if task["state"] in OPEN_STATES:
+            raise BadState("a download of this video is already queued or running")
+        last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM attempts WHERE task_id = ?", (task["id"],)).fetchone()[0]
+        conn.execute("UPDATE tasks SET state = 'pending', tier = 1, tier_since = ?, not_before = NULL, claimed_by = NULL, "
+                     "lease_until = NULL, pause_reason = NULL, reopen_at = NULL, reset_attempt_id = ?, failures = 0, "
+                     "progress = '', finished_at = NULL, title = ?, updated_at = ? WHERE id = ?",
+                     (ts(now), last, title or task["title"], ts(now), task["id"]))
+        _event(conn, task["id"], now, "reopened", "download requested again")
+        return task["id"]

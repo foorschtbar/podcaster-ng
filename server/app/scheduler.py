@@ -7,7 +7,7 @@ from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
 
-from . import notifications, queue, settings, watchdog
+from . import notifications, queue, retention, settings, watchdog
 from .db import connect
 
 log = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ STARTED = datetime.now(timezone.utc)
 
 
 def tick(db_path: Path, env_defaults: dict | None = None, transport=None, now: datetime | None = None,
-         started_at: datetime | None = None) -> dict:
+         started_at: datetime | None = None, media_dir: Path | None = None) -> dict:
     """One scheduler pass (also callable from tests)."""
     now = now or queue.utcnow()
     conn = connect(db_path)
@@ -31,6 +31,12 @@ def tick(db_path: Path, env_defaults: dict | None = None, transport=None, now: d
         sent = notifications.deliver_pending(conn, now, transport)
     finally:
         conn.close()
+    cleaned = None
+    if media_dir is not None:
+        try:
+            cleaned = retention.run_nightly(db_path, media_dir, env_defaults, now)
+        except Exception:  # noqa: BLE001 - a failing cleanup must not stop leases and scans
+            log.exception("The nightly retention run failed")
     if expired:
         log.warning("%d task lease(s) expired; the tasks are pending again", expired)
     if created:
@@ -38,14 +44,15 @@ def tick(db_path: Path, env_defaults: dict | None = None, transport=None, now: d
     if reopened:
         log.info("Reopened %d paused task(s)", reopened)
     return {"expired": expired, "scans_created": len(created), "reopened": reopened, "escalated": escalated,
-            "alerts": alerts, "messages": sent}
+            "alerts": alerts, "messages": sent, "retention": cleaned}
 
 
-async def scheduler_loop(db_path: Path, interval: float, env_defaults: dict | None = None, transport=None) -> None:
+async def scheduler_loop(db_path: Path, interval: float, env_defaults: dict | None = None, transport=None,
+                         media_dir: Path | None = None) -> None:
     await asyncio.sleep(min(FIRST_TICK_DELAY, interval))
     while True:
         try:
-            await run_in_threadpool(tick, db_path, env_defaults, transport)
+            await run_in_threadpool(tick, db_path, env_defaults, transport, None, None, media_dir)
         except Exception:  # noqa: BLE001 - the scheduler must never die
             log.exception("Scheduler tick failed")
         await asyncio.sleep(interval)

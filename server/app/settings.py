@@ -16,7 +16,7 @@ from .validate import parse_int, parse_url
 class Field:
     key: str
     label: str
-    kind: str  # "int" | "bool" | "text" | "url" | "secret"
+    kind: str  # "int" | "bool" | "text" | "url" | "secret" | "time"
     group: str
     default: object = None
     minimum: int = 0
@@ -37,6 +37,11 @@ FIELDS = (
           hint="Empty: keep all."),
     Field("max_age_days", "Delete episodes older than", "int", "Retention defaults", None, 1, 36500,
           optional=True, unit="days", hint="Empty: no age limit."),
+    Field("retention_enabled", "Delete old episodes automatically every night", "bool", "Retention defaults", 0,
+          hint="Off by default. Check the preview on the Retention page first; rules are set per podcast or above."),
+    Field("retention_time", "Nightly run at (UTC)", "time", "Retention defaults", "03:45"),
+    Field("retention_max_per_run", "Delete at most this many episodes per run", "int", "Retention defaults", 25, 1, 100000,
+          hint="A safety net: a wrong rule cannot wipe everything in one night. The newest episode of a podcast is never deleted."),
     Field("upload_limit_mb", "Upload size limit per file", "int", "Uploads", 1024, 1, 102400, unit="MB",
           hint="Must match the limit configured in the reverse proxy."),
     Field("lease_seconds", "Task lease duration", "int", "Queue", 300, 30, 3600, unit="seconds"),
@@ -59,6 +64,7 @@ FIELDS = (
 BY_KEY = {f.key: f for f in FIELDS}
 
 _TOKEN = re.compile(r"^\d+:[A-Za-z0-9_-]{8,}$")
+_TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _CHAT = re.compile(r"^(-?\d+|@[A-Za-z0-9_]{5,})$")
 
 
@@ -127,6 +133,11 @@ def validate(form, env_defaults: dict | None = None) -> tuple[dict, dict]:
                 errors[f.key] = err
             else:
                 changes[f.key] = value.rstrip("/") if value else None
+        elif f.kind == "time":
+            if not _TIME.match(raw):
+                errors[f.key] = "must be a time like 03:45"
+            else:
+                changes[f.key] = raw
         else:  # text
             if raw and not _CHAT.match(raw):
                 errors[f.key] = "must be a numeric id or @channelname"

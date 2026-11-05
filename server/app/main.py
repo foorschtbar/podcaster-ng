@@ -44,7 +44,8 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
         background = [asyncio.create_task(prune_loop(config.db_path, staging_dir=config.staging_dir))]
         if config.run_scheduler:
             background.append(asyncio.create_task(scheduler_loop(
-                config.db_path, config.scheduler_tick_seconds, {"base_url": config.base_url}, telegram_transport)))
+                config.db_path, config.scheduler_tick_seconds, {"base_url": config.base_url}, telegram_transport,
+                config.media_dir)))
         try:
             yield
         finally:
