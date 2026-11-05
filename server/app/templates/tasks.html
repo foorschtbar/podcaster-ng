@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Tasks – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>Tasks</h1>
+  <p class="small muted">{{ counts.pending }} pending · {{ counts.claimed }} running · {{ counts.paused }} paused · {{ counts.done }} done · {{ counts.closed }} closed</p>
+  <form method="get" action="/tasks" class="card filters">
+    <label>State
+      <select name="state"><option value="">All</option>{% for s in states %}<option value="{{ s }}"{% if s == state %} selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    </label>
+    <label>Podcast
+      <select name="podcast"><option value="">All</option>{% for p in all_podcasts %}<option value="{{ p.id }}"{% if p.id == podcast %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+    </label>
+    <label>Type
+      <select name="type"><option value="">All</option>{% for t in types %}<option value="{{ t }}"{% if t == type %} selected{% endif %}>{{ t }}</option>{% endfor %}</select>
+    </label>
+    <button type="submit">Filter</button>
+  </form>
+  {% if not tasks %}<p class="muted">No tasks{% if state or podcast or type %} match the filter{% endif %}.</p>{% endif %}
+  {% for t in tasks %}
+  <article class="card item">
+    <div class="item-head">
+      <a href="/tasks/{{ t.id }}"><strong>#{{ t.id }} {{ t.type }}</strong> <span class="muted">{{ t.podcast_name }}</span></a>
+      <span class="badge {{ 'on' if t.state in ('claimed', 'done') else 'off' }}">{{ t.state }}</span>
+    </div>
+    {% if t.type == 'download' %}<div class="small">{{ t.title or t.video_id }}</div>{% endif %}
+    <div class="muted small">
+      {% if t.worker_name %}worker {{ t.worker_name }} · {% endif %}{{ t.attempt_count }} attempt(s){% if t.failures %} · {{ t.failures }} failed{% endif %}
+      {% if t.not_before and t.state == 'pending' %} · waits until {{ t.not_before | until }}{% endif %} · updated {{ t.updated_at | until }}
+    </div>
+  </article>
+  {% endfor %}
+  {% if page_count > 1 %}
+  <p class="actions">
+    {% if page > 1 %}<a class="btn secondary" href="/tasks?{{ query }}{{ '&' if query }}page={{ page - 1 }}">← Newer</a>{% endif %}
+    <span class="muted small">Page {{ page }} of {{ page_count }} ({{ total }} tasks)</span>
+    {% if page < page_count %}<a class="btn secondary" href="/tasks?{{ query }}{{ '&' if query }}page={{ page + 1 }}">Older →</a>{% endif %}
+  </p>
+  {% endif %}
+{% endblock %}

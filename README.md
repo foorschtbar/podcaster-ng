@@ -2,7 +2,7 @@
 
 Turns YouTube playlists into podcast feeds. The **server** coordinates and serves (feeds, files, queue, admin UI, SQLite); replaceable **workers** (yt-dlp, ffmpeg, deno) run on any network and upload finished episodes.
 
-**Status:** server skeleton plus a mobile-first admin shell behind a login with podcast and settings management, public feeds and files compatible with the old Podcaster, an import assistant, and hit statistics with a dashboard, and worker registration with a first worker API. Workers connect and show as online; they do not process tasks yet.
+**Status:** server skeleton plus a mobile-first admin shell behind a login with podcast and settings management, public feeds and files compatible with the old Podcaster, an import assistant, and hit statistics with a dashboard, worker registration, and a work queue: the server schedules scans of the playlists, workers claim and run them, and the results become download tasks. Downloads are not executed yet.
 
 ## Layout
 
@@ -82,8 +82,32 @@ Header `Authorization: Bearer <token>`, base path `/api/worker`, separate from t
 |---|---|
 | `POST /hello` | worker reports its version, yt-dlp/ffmpeg/deno versions and capabilities; the reply has server time, API version, the worker's effective pacing limits, lease duration and ping interval |
 | `GET /ping` | authenticated liveness call |
+| `POST /claim` | ask for work (`{"types": ["scan"]}`); the reply holds a task or `retry_after_seconds` |
+| `POST /tasks/{id}/heartbeat` | extend the lease of the claimed task (`409` if it is not yours any more) |
+| `POST /tasks/{id}/scan-result` | report the videos of a playlist scan |
+| `POST /tasks/{id}/fail` | report an error class and text (`bot_check`, `not_yet_available`, `private`, `removed`, `network`, `timeout`, `internal`, `incomplete`) |
 
 `401` for a missing, unknown or revoked token, `403` for a deactivated worker, `429` when rate limited: invalid tokens are limited per client address (10 failures in 5 minutes lock that address out for 5 minutes, but never a valid token), valid workers to 120 calls per minute. Every authenticated call updates *last seen*. Tokens are never logged or stored in clear text.
+
+## Queue, claims and scans
+
+State machine in `server/app/queue.py` (the only place that changes task states; API, scheduler and UI call it). Every change runs in one `BEGIN IMMEDIATE` transaction.
+
+```
+pending --claim--> claimed --scan-result--> done
+   ^                  |
+   |      fail / lease expired
+   +---- retry <------+-----> closed (private / removed video, or closed by hand)
+```
+
+- **Scheduler** (a background task in the server, every 15 s): returns tasks whose lease expired to `pending` (recording a `lease_expired` attempt) and creates a `scan` task for every active podcast whose scan interval has elapsed and that has no open scan. Set `SCHEDULER=0` to switch it off.
+- **Claim:** atomic; a worker holds at most one task; scans come before downloads, oldest first; tasks wait for `not_before`; paused podcasts are skipped. For downloads the pacing limits apply: downloads per hour per worker, downloads per hour per podcast (the worker's value caps the podcast's), and a pause between downloads (the larger of worker and podcast). Without a task the reply says when to ask again. All tiers see all tasks for now; escalation across tiers comes with the alerting step.
+- **Lease:** 300 s (Settings → Queue). The worker extends it with a heartbeat while it works; a worker that is killed simply stops, the lease runs out, the task becomes pending and the next claim succeeds. A late result from the old worker is answered with `409`.
+- **Scan result:** the first *scan depth* videos count. A video becomes a `download` task unless it has an episode row (in any state) or already had a download task (in any state; closed tasks are reopened with *Retry*). Premieres and live streams get `not_before` (announced start plus 30 minutes) instead of failing.
+- **Failures:** retried after a growing backoff (1, 2, 4 … 30 minutes); `not_yet_available` waits for `not_before` without counting as a failure; `private`/`removed` close the task. Error texts are trimmed to 500 characters and scrubbed of tokens, credentials and cookies before they are stored.
+- **Tasks page** (`/tasks`): filter by state, podcast and type, details with all attempts, and *Release*, *Retry* and *Close*. *Scan now* is on each podcast.
+
+The worker runs scans with the yt-dlp command line (metadata only, `--flat-playlist`) as a separate process with a hard time limit (`SCAN_TIMEOUT`, default 300 s), so a hung scan is killed. `YTDLP_PROXY` sets a proxy for yt-dlp only; the calls to the server never use proxy environment variables. `POLL_INTERVAL` overrides the idle wait between claims. A worker without yt-dlp only pings.
 
 ## Statistics and dashboard
 

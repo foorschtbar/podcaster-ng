@@ -14,6 +14,8 @@ class Config:
     admin_password: str = ""
     session_secret: str = ""
     import_dir: Path = Path("/import")
+    run_scheduler: bool = True
+    scheduler_tick_seconds: float = 15.0
 
     @property
     def db_path(self) -> Path:
@@ -41,4 +43,5 @@ class Config:
             admin_password=os.environ.get("ADMIN_PASSWORD") or "",
             session_secret=os.environ.get("SESSION_SECRET") or "",
             import_dir=Path(os.environ.get("IMPORT_DIR") or "/import"),
+            run_scheduler=(os.environ.get("SCHEDULER") or "1") != "0",
         )

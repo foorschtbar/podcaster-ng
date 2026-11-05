@@ -19,6 +19,7 @@ from .middleware import HitCounter, SecurityHeaders
 from .migrations import migrate
 from .public import router as public_router
 from .routes import router as admin_router
+from .scheduler import scheduler_loop
 from .stats import prune_loop
 from .worker_api import router as worker_router
 from .web import CsrfError, LoginRequired, NotConfigured, locked_response
@@ -36,13 +37,17 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
         if not config.admin_configured:
             log.warning("ADMIN_USER/ADMIN_PASSWORD not set: admin UI is locked")
         log.info("PodcasterNG server %s started", __version__)
-        prune_task = asyncio.create_task(prune_loop(config.db_path))
+        background = [asyncio.create_task(prune_loop(config.db_path))]
+        if config.run_scheduler:
+            background.append(asyncio.create_task(scheduler_loop(config.db_path, config.scheduler_tick_seconds)))
         try:
             yield
         finally:
-            prune_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await prune_task
+            for task in background:
+                task.cancel()
+            for task in background:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     app = FastAPI(title="PodcasterNG", version=__version__, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)

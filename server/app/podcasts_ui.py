@@ -3,7 +3,7 @@
 from fastapi import Depends, Path, Request
 from fastapi.responses import HTMLResponse
 
-from . import episodes, podcasts, settings
+from . import episodes, podcasts, queue, settings
 from .web import Session, db, env_defaults, protected, redirect, render, require_session
 
 FLASH = {
@@ -12,6 +12,8 @@ FLASH = {
     "paused": "Podcast paused.",
     "resumed": "Podcast resumed.",
     "deleted": "Podcast deleted.",
+    "scan_open": "A scan of this podcast is already queued or running.",
+    "scan_paused": "This podcast is paused. Resume it first, then scan.",
 }
 SLUG = Path(pattern=r"^[a-z0-9-]{1,64}$")
 FORM_KEYS = ["id", "name", "author", "description", "playlist_url", "image_url", "scan_interval_min", "scan_depth",
@@ -108,6 +110,19 @@ def podcast_pause(request: Request, podcast_id: str = SLUG, session: Session = D
 @protected.post("/podcasts/{podcast_id}/resume", include_in_schema=False)
 def podcast_resume(request: Request, podcast_id: str = SLUG, session: Session = Depends(require_session)):
     return _toggle(request, podcast_id, session, True)
+
+
+@protected.post("/podcasts/{podcast_id}/scan", include_in_schema=False)
+def podcast_scan(request: Request, podcast_id: str = SLUG, session: Session = Depends(require_session)):
+    """'Scan now': queue a scan task immediately (the scheduler does it on the interval)."""
+    with db(request) as conn:
+        podcast = podcasts.get(conn, podcast_id)
+        if not podcast:
+            return _not_found(request, session)
+        if not podcast["active"]:
+            return redirect("/podcasts?msg=scan_paused")
+        task_id = queue.create_scan(conn, podcast_id)
+    return redirect(f"/tasks/{task_id}") if task_id else redirect("/podcasts?msg=scan_open")
 
 
 @protected.get("/podcasts/{podcast_id}/delete", response_class=HTMLResponse, include_in_schema=False)

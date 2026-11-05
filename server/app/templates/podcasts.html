@@ -20,6 +20,10 @@
         <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
         <button type="submit" class="secondary">{{ 'Pause' if p.active else 'Resume' }}</button>
       </form>
+      <form method="post" action="/podcasts/{{ p.id }}/scan">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+        <button type="submit" class="secondary">Scan now</button>
+      </form>
     </div>
   </article>
   {% endfor %}

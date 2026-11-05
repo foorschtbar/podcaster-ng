@@ -153,3 +153,10 @@ ul.plain { list-style: none; margin: 0; padding: 0; }
 ul.plain li { margin-bottom: .4rem; }
 input.token { user-select: all; font-family: ui-monospace, monospace; font-size: .85rem; }
 pre.cmd { background: var(--bg); border: 1px solid var(--line); border-radius: .4rem; padding: .75rem; overflow-x: auto; font-size: .8rem; white-space: pre; }
+
+.filters { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); align-items: end; margin-bottom: 1rem; }
+.filters label { margin: 0; }
+select { display: block; width: 100%; margin-top: .25rem; padding: .65rem .7rem; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: .4rem; }
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 0 0 .5rem; }
+dl.facts dt { color: var(--muted); } dl.facts dd { margin: 0; min-width: 0; }
+h3.small { margin: .75rem 0 .25rem; font-weight: 600; }

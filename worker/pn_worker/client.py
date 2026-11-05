@@ -3,7 +3,8 @@
 import httpx
 import pydantic
 
-from pn_shared.api import HelloRequest, HelloResponse, PingResponse
+from pn_shared.api import (ClaimRequest, ClaimResponse, FailRequest, FailResponse, HeartbeatRequest, HeartbeatResponse,
+                           HelloRequest, HelloResponse, PingResponse, ScanResult, ScanResultResponse)
 
 from . import __version__
 
@@ -18,13 +19,18 @@ class AuthError(Exception):
         self.status = status
 
 
+class TaskLost(Exception):
+    """The server says this task is not (or no longer) ours: the lease expired and it was handed on."""
+
+
 class ServerError(Exception):
     """Server unreachable or answering with an unexpected status."""
 
 
 class ApiClient:
     def __init__(self, server_url: str, token: str, transport: httpx.BaseTransport | None = None):
-        self._http = httpx.Client(base_url=server_url + "/api/worker", timeout=TIMEOUT, transport=transport,
+        # trust_env=False: proxy variables meant for yt-dlp (a VPN proxy) must not redirect the calls to the server.
+        self._http = httpx.Client(base_url=server_url + "/api/worker", timeout=TIMEOUT, transport=transport, trust_env=False,
                                   headers={"Authorization": f"Bearer {token}",
                                            "User-Agent": f"podcaster-ng-worker/{__version__}"})
 
@@ -43,6 +49,8 @@ class ApiClient:
             except ValueError:
                 pass
             raise AuthError(response.status_code, detail)
+        if response.status_code in (404, 409) and "/tasks/" in path:
+            raise TaskLost(f"task not available to this worker ({response.status_code})")
         if response.status_code != 200:
             raise ServerError(f"unexpected status {response.status_code}")
         try:
@@ -62,3 +70,16 @@ class ApiClient:
 
     def ping(self) -> PingResponse:
         return self._parse(PingResponse, self._call("GET", "/ping"))
+
+    def claim(self, request: ClaimRequest) -> ClaimResponse:
+        return self._parse(ClaimResponse, self._call("POST", "/claim", json=request.model_dump()))
+
+    def heartbeat(self, task_id: int, progress: str | None = None) -> HeartbeatResponse:
+        body = HeartbeatRequest(progress=progress).model_dump(exclude_none=True)
+        return self._parse(HeartbeatResponse, self._call("POST", f"/tasks/{task_id}/heartbeat", json=body))
+
+    def scan_result(self, task_id: int, result: ScanResult) -> ScanResultResponse:
+        return self._parse(ScanResultResponse, self._call("POST", f"/tasks/{task_id}/scan-result", json=result.model_dump()))
+
+    def fail(self, task_id: int, request: FailRequest) -> FailResponse:
+        return self._parse(FailResponse, self._call("POST", f"/tasks/{task_id}/fail", json=request.model_dump(exclude_none=True)))

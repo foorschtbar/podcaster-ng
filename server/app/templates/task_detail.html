@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Task {{ task.id }} – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>Task #{{ task.id }} <span class="badge {{ 'on' if task.state in ('claimed', 'done') else 'off' }}">{{ task.state }}</span></h1>
+  {% if flash %}<p class="notice" role="status">{{ flash }}</p>{% endif %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <div class="card">
+    <dl class="facts">
+      <dt>Type</dt><dd>{{ task.type }}</dd>
+      <dt>Podcast</dt><dd><a href="/podcasts/{{ task.podcast_id }}">{{ task.podcast_name }}</a> <code>{{ task.podcast_id }}</code></dd>
+      {% if task.video_id %}<dt>Video</dt><dd>{{ task.title or '–' }} <code>{{ task.video_id }}</code></dd>{% endif %}
+      <dt>Created</dt><dd>{{ task.created_at }} ({{ task.created_at | until }})</dd>
+      {% if task.not_before %}<dt>Not before</dt><dd>{{ task.not_before }} ({{ task.not_before | until }})</dd>{% endif %}
+      {% if task.worker_name %}<dt>Claimed by</dt><dd>{{ task.worker_name }}{% if task.lease_until %}, lease until {{ task.lease_until }} ({{ task.lease_until | until }}){% endif %}</dd>{% endif %}
+      <dt>Failed attempts</dt><dd>{{ task.failures }}</dd>
+      {% if task.finished_at %}<dt>Finished</dt><dd>{{ task.finished_at }}</dd>{% endif %}
+    </dl>
+    <div class="actions">
+      {% if task.state == 'claimed' %}
+      <form method="post" action="/tasks/{{ task.id }}/release"><input type="hidden" name="csrf_token" value="{{ session.csrf }}"><button type="submit" class="secondary">Release</button></form>
+      {% endif %}
+      {% if task.state in ('pending', 'paused', 'closed') %}
+      <form method="post" action="/tasks/{{ task.id }}/retry"><input type="hidden" name="csrf_token" value="{{ session.csrf }}"><button type="submit" class="secondary">{{ 'Retry now' if task.state == 'pending' else 'Retry' }}</button></form>
+      {% endif %}
+      {% if task.state in ('pending', 'claimed', 'paused') %}
+      <form method="post" action="/tasks/{{ task.id }}/close"><input type="hidden" name="csrf_token" value="{{ session.csrf }}"><button type="submit" class="danger">Close</button></form>
+      {% endif %}
+    </div>
+  </div>
+  <h2>Attempts ({{ attempts | length }})</h2>
+  {% if not attempts %}<p class="muted">None yet.</p>{% endif %}
+  {% for a in attempts %}
+  <div class="card item">
+    <div class="item-head"><strong>{{ a.worker_name or 'worker deleted' }}</strong>
+      <span class="badge {{ 'on' if a.result == 'ok' else 'off' }}">{{ a.result or 'running' }}</span></div>
+    <div class="muted small">{{ a.started_at }}{% if a.ended_at %} → {{ a.ended_at }}{% endif %}{% if a.error_class %} · {{ a.error_class }}{% endif %}</div>
+    {% if a.error_text %}<div class="small">{{ a.error_text }}</div>{% endif %}
+    {% if a.note %}<div class="muted small">{{ a.note }}</div>{% endif %}
+  </div>
+  {% endfor %}
+  <p><a class="btn secondary" href="/tasks">Back to tasks</a></p>
+{% endblock %}

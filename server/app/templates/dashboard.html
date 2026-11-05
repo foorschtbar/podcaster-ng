@@ -99,7 +99,21 @@
       {% endfor %}
       </ul>
     {% else %}<p class="muted">No workers yet. <a href="/workers/new">Create one</a>.</p>{% endif %}
-    <p class="muted small">Queue and error rate appear here once tasks exist.</p>
+  </section>
+
+  <section class="card" aria-labelledby="q-h">
+    <h2 id="q-h">Queue</h2>
+    <p class="small"><a href="/tasks?state=pending">{{ queue.pending }} pending</a> · <a href="/tasks?state=claimed">{{ queue.claimed }} running</a> ·
+      <a href="/tasks?state=paused">{{ queue.paused }} paused</a> · {{ queue.open_downloads }} downloads open</p>
+    {% if recent_errors %}
+      <h3 class="small">Latest errors</h3>
+      <ul class="plain small">
+      {% for e in recent_errors %}
+        <li><a href="/tasks/{{ e.task_id }}">#{{ e.task_id }} {{ e.type }}</a> <span class="badge off">{{ e.error_class or e.result }}</span>
+          <span class="muted">{{ e.worker_name }} · {{ e.ended_at | until }}</span>{% if e.error_text %}<div class="muted">{{ e.error_text }}</div>{% endif %}</li>
+      {% endfor %}
+      </ul>
+    {% else %}<p class="muted small">No errors so far.</p>{% endif %}
   </section>
 
   <details class="card table-view">

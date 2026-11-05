@@ -13,7 +13,7 @@ SERVER_DIR = Path(__file__).resolve().parent.parent
 
 
 def make_config(tmp_path):
-    return Config(data_dir=tmp_path, base_url="", log_level="INFO")
+    return Config(data_dir=tmp_path, base_url="", log_level="INFO", run_scheduler=False)
 
 
 def test_healthz_ok(tmp_path):

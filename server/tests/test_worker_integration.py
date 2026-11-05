@@ -47,7 +47,7 @@ class Server:
 class WorkerThread:
     def __init__(self, cfg):
         self.stop_event = threading.Event()
-        self.thread = threading.Thread(target=run, args=(cfg, self.stop_event), daemon=True)
+        self.thread = threading.Thread(target=run, args=(cfg, self.stop_event), kwargs={"found": {}}, daemon=True)
 
     def start(self):
         self.thread.start()

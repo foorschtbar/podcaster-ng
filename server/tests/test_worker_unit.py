@@ -154,7 +154,7 @@ def run_script(script, steps, tmp_path, **cfg):
 
     client = FakeClient(script)
     config = Config(server_url="https://x", token="pnw_t", alive_file=str(tmp_path / "alive"), **cfg)
-    run(config, stop, client=client, sleep=fake_sleep)
+    run(config, stop, client=client, sleep=fake_sleep, found={})
     return client, sleeps
 
 
@@ -195,7 +195,7 @@ def test_loop_stops_cleanly_when_asked(tmp_path):
     stop = threading.Event()
     stop.set()
     client = FakeClient([])
-    run(Config(server_url="https://x", token="t", alive_file=str(tmp_path / "a")), stop, client=client)
+    run(Config(server_url="https://x", token="t", alive_file=str(tmp_path / "a")), stop, client=client, found={})
     assert client.calls == [] and client.closed
 
 
@@ -226,7 +226,7 @@ def test_tool_detection(tmp_path, monkeypatch):
     fake_binary(tmp_path, "deno", "deno 2.1.4 (stable)")
     assert tools.detect() == {"ytdlp": "2026.10.15", "ffmpeg": "7.0.2-static", "deno": "2.1.4"}
     req = hello_request()
-    assert req.capabilities == ["deno", "ffmpeg", "ytdlp"] and req.ytdlp_version == "2026.10.15"
+    assert req.capabilities == ["deno", "ffmpeg", "scan", "ytdlp"] and req.ytdlp_version == "2026.10.15"
 
 
 def test_hello_without_tools(monkeypatch, tmp_path):

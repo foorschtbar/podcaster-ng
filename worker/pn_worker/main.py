@@ -6,11 +6,12 @@ import random
 import threading
 import time
 
-from pn_shared.api import HelloRequest
+from pn_shared.api import ClaimRequest, HelloRequest
 
 from . import __version__, tools
 from .client import ApiClient, AuthError, ServerError
 from .config import Config
+from .tasks import run_task
 
 log = logging.getLogger("pn_worker")
 AUTH_RETRY_SECONDS = 60.0  # a rejected token may be fixed in the admin UI at any time
@@ -25,11 +26,16 @@ def backoff_delays(start: float, maximum: float, rng: random.Random | None = Non
         delay = min(maximum, delay * 2)
 
 
-def hello_request() -> HelloRequest:
-    found = tools.detect()
+def supported_types(found: dict[str, str]) -> list[str]:
+    """Task types this worker can execute with the tools it has. Downloads arrive in a later step."""
+    return ["scan"] if "ytdlp" in found else []
+
+
+def hello_request(found: dict[str, str] | None = None) -> HelloRequest:
+    found = tools.detect() if found is None else found
     return HelloRequest(
         worker_version=__version__, ytdlp_version=found.get("ytdlp"), ffmpeg_version=found.get("ffmpeg"),
-        deno_version=found.get("deno"), capabilities=sorted(found))
+        deno_version=found.get("deno"), capabilities=sorted([*found, *supported_types(found)]))
 
 
 def _touch(path: str) -> None:
@@ -40,29 +46,47 @@ def _touch(path: str) -> None:
         pass
 
 
-def run(config: Config, stop: threading.Event, client: ApiClient | None = None, sleep=None) -> None:
+def idle_delay(hint: float, idle_count: int, maximum: float = 60.0) -> float:
+    """Wait after an empty claim: the server's hint, growing by half per empty answer (up to 3 times)."""
+    return min(maximum, hint * 1.5 ** min(idle_count, 3))
+
+
+def run(config: Config, stop: threading.Event, client: ApiClient | None = None, sleep=None, found: dict | None = None) -> None:
     """Run until ``stop`` is set. Never raises on network or server problems."""
     client = client or ApiClient(config.server_url, config.token)
     wait = sleep or stop.wait
     delays = backoff_delays(config.backoff_start, config.backoff_max)
     connected = False
     interval = config.ping_interval or 30.0
+    found = tools.detect() if found is None else found
+    types = supported_types(found)
+    idle = 0
     log.info("Worker %s starting, server %s", __version__, config.server_url)
     while not stop.is_set():
         _touch(config.alive_file)  # the container health check looks at this file
         try:
             if not connected:
-                reply = client.hello(hello_request())
+                reply = client.hello(hello_request(found))
                 connected = True
+                idle = 0
                 interval = config.ping_interval or float(reply.ping_interval_seconds)
                 delays = backoff_delays(config.backoff_start, config.backoff_max)
                 skew = abs(time.time() - _epoch(reply.server_time))
                 log.info("Connected as %r (tier %d), pinging every %.0f s", reply.worker.name, reply.worker.tier, interval)
                 if skew > 300:
                     log.warning("Clock differs from the server's by %.0f s", skew)
+                wait(interval if not types else 0)
+            elif types:
+                answer = client.claim(ClaimRequest(types=types))   # also counts as "seen"
+                if answer.task:
+                    idle = 0
+                    run_task(client, answer.task, config)
+                else:
+                    wait(config.poll_interval or idle_delay(answer.retry_after_seconds, idle))
+                    idle += 1
             else:
                 client.ping()
-            wait(interval)
+                wait(interval)
         except AuthError as exc:
             connected = False
             log.error("%s; retrying in %.0f s", exc, AUTH_RETRY_SECONDS)

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
 
-from . import settings
+from . import queue, settings
 from .app_groups import OTHER
 from .db import connect
 
@@ -55,10 +55,11 @@ def prune_once(db_path: Path) -> int:
     conn = connect(db_path)
     try:
         removed = prune(conn, settings.get(conn, "stats_retention_days"))
+        old_scans = queue.prune(conn)
     finally:
         conn.close()
-    if removed:
-        log.info("Pruned %d old daily counter rows", removed)
+    if removed or old_scans:
+        log.info("Pruned %d old daily counter rows and %d old scan tasks", removed, old_scans)
     return removed
 
 
@@ -70,8 +71,9 @@ def seconds_until(hour: int, minute: int, now: datetime | None = None) -> float:
     return (target - now).total_seconds()
 
 
-async def prune_loop(db_path: Path) -> None:
-    """Prune at start and then every night at 03:30 UTC."""
+async def prune_loop(db_path: Path, first_delay: float = 60.0) -> None:
+    """Prune shortly after start and then every night at 03:30 UTC."""
+    await asyncio.sleep(first_delay)
     while True:
         try:
             await run_in_threadpool(prune_once, db_path)

@@ -5,7 +5,7 @@ from datetime import timedelta
 from fastapi import Depends, Request
 from fastapi.responses import HTMLResponse
 
-from . import charts, settings, stats
+from . import charts, queue, settings, stats
 from .workers_ui import worker_cards
 from .web import Session, db, env_defaults, protected, render, require_session, templates
 
@@ -37,6 +37,8 @@ def dashboard_context(conn, data_dir, env_defaults: dict | None = None) -> dict:
         "top_max": top[0]["count"] if top else 1,
         "apps_files": _shares(stats.app_shares(conn, "file", DAYS, today)),
         "apps_feeds": _shares(stats.app_shares(conn, "feed", DAYS, today)),
+        "queue": queue.counts(conn),
+        "recent_errors": queue.recent_errors(conn, 5),
         "workers": worker_list,
         "workers_online": sum(1 for w in worker_list if w["status"] == "online"),
         "storage": storage,

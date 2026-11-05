@@ -1,6 +1,6 @@
 """Worker API v1 schemas (used by the server for validation and by the worker as client models)."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, StringConstraints
 
@@ -41,3 +41,76 @@ class HelloResponse(BaseModel):
 class PingResponse(BaseModel):
     ok: bool = True
     server_time: str
+
+
+# --- queue: claim, heartbeat, scan result, fail -----------------------------------------------------
+
+TaskType = Literal["scan", "download"]
+ErrorClass = Literal["bot_check", "not_yet_available", "private", "removed", "network", "timeout", "internal",
+                     "incomplete"]
+VideoId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
+
+
+class ClaimRequest(BaseModel):
+    types: list[TaskType] = Field(default_factory=lambda: ["scan"], min_length=1, max_length=2)
+
+
+class TaskPodcast(BaseModel):
+    id: str
+    name: str
+    playlist_url: str
+    scan_depth: int
+
+
+class TaskInfo(BaseModel):
+    id: int
+    type: TaskType
+    podcast: TaskPodcast
+    video_id: str | None = None
+    title: str = ""
+    attempt: int
+    lease_seconds: int
+    lease_until: str
+    pacing: Pacing
+
+
+class ClaimResponse(BaseModel):
+    task: TaskInfo | None = None
+    retry_after_seconds: int = 15  # when to ask again if there was no task
+
+
+class HeartbeatRequest(BaseModel):
+    progress: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+class HeartbeatResponse(BaseModel):
+    lease_until: str
+
+
+class VideoInfo(BaseModel):
+    id: VideoId
+    title: Annotated[str, StringConstraints(max_length=500)] = ""
+    upload_date: Annotated[str, StringConstraints(max_length=20)] | None = None
+    live_status: Annotated[str, StringConstraints(max_length=30)] | None = None  # e.g. is_upcoming, is_live
+    release_timestamp: int | None = None  # epoch seconds, for premieres
+
+
+class ScanResult(BaseModel):
+    videos: list[VideoInfo] = Field(default_factory=list, max_length=1000)
+
+
+class ScanResultResponse(BaseModel):
+    created: int  # download tasks created
+    known: int    # already known (episode or task)
+    skipped: int  # beyond the scan depth
+
+
+class FailRequest(BaseModel):
+    error_class: ErrorClass
+    message: Annotated[str, StringConstraints(max_length=4000)] = ""
+    retry_after_seconds: int | None = Field(default=None, ge=0, le=7 * 86400)
+
+
+class FailResponse(BaseModel):
+    state: str
+    not_before: str | None = None

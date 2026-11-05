@@ -9,10 +9,11 @@ from app.main import create_app
 USER, PASSWORD = "admin", "s3cret-pw"
 
 
-def make_config(tmp_path, user=USER, password=PASSWORD, secret="", base_url="", import_dir=None):
+def make_config(tmp_path, user=USER, password=PASSWORD, secret="", base_url="", import_dir=None, **extra):
     kw = {"import_dir": import_dir} if import_dir else {}
-    return Config(data_dir=tmp_path, base_url=base_url, log_level="INFO",
-                  admin_user=user, admin_password=password, session_secret=secret, **kw)
+    # The scheduler stays off in tests unless a test asks for it (deterministic task tables).
+    return Config(data_dir=tmp_path, base_url=base_url, log_level="INFO", admin_user=user, admin_password=password,
+                  session_secret=secret, **{"run_scheduler": False, **kw, **extra})
 
 
 def make_client(tmp_path, **kw):
