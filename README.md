@@ -1,3 +1,5 @@
+<p align="center"><img src="server/app/static/logo.svg" alt="PodcasterNG" width="120"></p>
+
 # PodcasterNG
 
 Turns YouTube playlists into podcast feeds. The **server** coordinates and serves (feeds, files, queue, admin UI, SQLite); replaceable **workers** (yt-dlp, ffmpeg, deno) run on any network and upload finished episodes.

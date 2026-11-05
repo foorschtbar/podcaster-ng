@@ -66,6 +66,7 @@ def run(config: Config, stop: threading.Event, client: ApiClient | None = None, 
     found = tools.detect() if found is None else found
     types = supported_types(found)
     idle = 0
+    dropped: list[int] = []   # tasks given up because their result could not be delivered; sent with the next claim
     log.info("Worker %s starting, server %s", __version__, config.server_url)
     while not stop.is_set():
         _touch(config.alive_file)  # the container health check looks at this file
@@ -82,10 +83,12 @@ def run(config: Config, stop: threading.Event, client: ApiClient | None = None, 
                     log.warning("Clock differs from the server's by %.0f s", skew)
                 wait(interval if not types else 0)
             elif types:
-                answer = client.claim(ClaimRequest(types=types))   # also counts as "seen"
+                answer = client.claim(ClaimRequest(types=types, dropped=dropped[-20:]))   # also counts as "seen"
+                dropped.clear()                                  # the server has been told
                 if answer.task:
                     idle = 0
-                    run_task(client, answer.task, config)
+                    if not run_task(client, answer.task, config):
+                        dropped.append(answer.task.id)           # tell the server with the next call
                     if answer.task.type == "download":   # a random pause between videos, as configured
                         limits = answer.task.pacing
                         wait(random.uniform(limits.pause_min_s, max(limits.pause_min_s, limits.pause_max_s)))

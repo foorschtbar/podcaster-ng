@@ -111,6 +111,25 @@ def prepare(task: TaskInfo, config: Config, work: Path, lost: threading.Event, p
     return files
 
 
+def deliver(call, lost: threading.Event, config: Config, what: str, pause=time.sleep):
+    """Run ``call()`` until the server answers. A server that restarts or is briefly unreachable is waited out
+    (2 s, doubling to 60 s) for up to ``config.delivery_timeout``, so a finished download is not thrown away.
+    Anything but "unreachable" (a rejection, a lost task) is raised at once."""
+    start, waited, delay = time.monotonic(), 0.0, 2.0
+    while True:
+        if lost.is_set():
+            raise Lost()
+        try:
+            return call()
+        except ServerError as exc:
+            if max(time.monotonic() - start, waited) + delay > config.delivery_timeout:
+                raise Failure("network", f"{what}: the server stayed unreachable for {config.delivery_timeout:.0f} s ({exc})") from None
+            log.warning("%s failed (%s); trying again in %.0f s", what, exc, delay)
+            pause(delay)
+            waited += delay
+            delay = min(60.0, delay * 2)
+
+
 def upload_file(client: ApiClient, task: TaskInfo, role: str, path: Path, ext: str, progress: Progress, config: Config,
                 lost: threading.Event, pause=time.sleep) -> FileEntry:
     digest = media.sha256_file(path)
@@ -123,22 +142,21 @@ def upload_file(client: ApiClient, task: TaskInfo, role: str, path: Path, ext: s
             last_percent = percent
             progress.text = f"uploading {role} {percent}%"
 
-    for attempt in range(1, config.upload_retries + 1):
-        if lost.is_set():
-            raise Lost()
+    rejected = 0
+    while True:
         progress.set(f"uploading {role}")
         try:
-            reply = client.upload(task.id, role, path, digest, ext, on_progress=report)
+            reply = deliver(lambda: client.upload(task.id, role, path, digest, ext, on_progress=report), lost, config,
+                            f"Upload of {role}", pause)
             return FileEntry(role=role, size=reply.size, sha256=reply.sha256)
-        except (ServerError, UploadRejected) as exc:
-            if isinstance(exc, UploadRejected) and exc.status == 413:
+        except UploadRejected as exc:
+            rejected += 1
+            if exc.status == 413:
                 raise Failure("incomplete", f"the server refuses the {role} file: {exc.detail}") from None
-            if attempt == config.upload_retries:
-                raise Failure("network" if isinstance(exc, ServerError) else "incomplete",
-                              f"the {role} upload failed {attempt} times: {exc}") from None
-            log.warning("Upload of %s failed (%s); trying again", role, exc)
-            pause(2.0 * attempt)
-    raise AssertionError("unreachable")
+            if rejected >= config.upload_retries:
+                raise Failure("incomplete", f"the {role} upload was rejected {rejected} times: {exc}") from None
+            log.warning("Upload of %s was rejected (%s); trying again", role, exc)
+            pause(2.0 * rejected)
 
 
 def run_download(client: ApiClient, task: TaskInfo, config: Config, lost: threading.Event, progress: Progress,
@@ -154,7 +172,7 @@ def run_download(client: ApiClient, task: TaskInfo, config: Config, lost: thread
                    for role, (path, ext) in files.items()]
         progress.set("publishing")
         try:
-            reply = client.complete(task.id, entries)
+            reply = deliver(lambda: client.complete(task.id, entries), lost, config, "Publishing", pause)
         except UploadRejected as exc:
             # The server has already recorded the rejected package as an incomplete attempt.
             log.error("Task %d: package rejected by the server: %s", task.id, exc.detail)

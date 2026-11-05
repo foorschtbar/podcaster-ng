@@ -286,10 +286,46 @@ def test_upload_is_retried_on_server_errors(tools, tmp_path):
     assert server.calls[-1][1] == "complete" and len([c for c in server.calls if c[1] == "upload"]) == 7   # 5 files + 2 retries
 
 
-def test_upload_gives_up_after_the_configured_retries(tools, tmp_path):
+def test_upload_gives_up_when_the_server_stays_unreachable(tools, tmp_path):
+    server = Server(upload_failures=99)
     with pytest.raises(Failure) as exc:
-        execute(tmp_path, "aaaaaaaaaaa", Server(upload_failures=99), upload_retries=3)
-    assert exc.value.error_class == "network" and "3 times" in exc.value.message
+        execute(tmp_path, "aaaaaaaaaaa", server, delivery_timeout=10.0)
+    assert exc.value.error_class == "network" and "stayed unreachable" in exc.value.message
+    assert len([c for c in server.calls if c[1] == "upload"]) == 3                   # waits of 2 s and 4 s, then 8 s would be too long
+
+
+def test_a_server_restart_in_the_middle_of_the_upload_is_waited_out(tools, tmp_path):
+    """The server was down for a while (a restart): the finished download is delivered afterwards, nothing is thrown away."""
+    server, _ = execute(tmp_path, "aaaaaaaaaaa", Server(upload_failures=8), delivery_timeout=900.0)
+    assert server.calls[-1][1] == "complete" and len([c for c in server.calls if c[1] == "upload"]) == 13   # 5 files + 8 failed tries
+
+
+def test_the_final_call_is_retried_too(tools, tmp_path):
+    class Flaky(Server):
+        failures = 3
+
+        def __call__(self, request):
+            if request.url.path.endswith("/complete") and self.failures:
+                self.failures -= 1
+                self.calls.append(("POST", "complete-down", None))
+                return httpx.Response(503)
+            return super().__call__(request)
+
+    server, _ = execute(tmp_path, "aaaaaaaaaaa", Flaky())
+    assert [c[1] for c in server.calls].count("complete-down") == 3 and server.calls[-1][1] == "complete"
+
+
+def test_the_failure_report_is_retried_until_the_server_is_back(tools, tmp_path):
+    from pn_worker.tasks import _report_failure
+    attempts = []
+
+    def handler(request):
+        attempts.append(request.url.path)
+        return httpx.Response(200, json={"state": "pending", "not_before": None}) if len(attempts) > 3 else httpx.Response(502)
+
+    client = ApiClient("https://x", "pnw_t", transport=httpx.MockTransport(handler))
+    _report_failure(client, task("aaaaaaaaaaa"), "network", "boom", None, cfg(tmp_path, delivery_timeout=300.0), pause=lambda s: None)
+    assert len(attempts) == 4
 
 
 @pytest.mark.parametrize("status,error_class", [(422, "incomplete"), (413, "incomplete")])

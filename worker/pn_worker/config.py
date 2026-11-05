@@ -24,7 +24,8 @@ class Config:
     download_timeout: float = 3600.0    # hard limit for one download task (yt-dlp, ffmpeg, upload)
     cookies_file: str | None = None     # optional yt-dlp cookies; never logged
     work_dir: str = "/tmp/pn-work"
-    upload_retries: int = 3
+    upload_retries: int = 3             # how often the server may reject a file before it counts as incomplete
+    delivery_timeout: float = 900.0     # how long uploads, the final call and failure reports wait for an unreachable server
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -46,9 +47,13 @@ class Config:
             download_timeout = float(os.environ.get("DOWNLOAD_TIMEOUT") or 3600)
         except ValueError:
             raise ConfigError("DOWNLOAD_TIMEOUT must be a number of seconds") from None
+        try:
+            delivery_timeout = float(os.environ.get("DELIVERY_TIMEOUT") or 900)
+        except ValueError:
+            raise ConfigError("DELIVERY_TIMEOUT must be a number of seconds") from None
         cookies = (os.environ.get("YTDLP_COOKIES") or "").strip() or None
         if cookies and not os.path.isfile(cookies):
             raise ConfigError("YTDLP_COOKIES points to a file that does not exist")
         return cls(server_url=server_url, token=token, poll_interval=poll, download_timeout=download_timeout,
                    cookies_file=cookies, work_dir=os.environ.get("WORK_DIR") or "/tmp/pn-work", log_level=(os.environ.get("LOG_LEVEL") or "INFO").upper(),
-                   scan_timeout=scan_timeout, ytdlp_proxy=(os.environ.get("YTDLP_PROXY") or "").strip() or None)
+                   scan_timeout=scan_timeout, delivery_timeout=delivery_timeout, ytdlp_proxy=(os.environ.get("YTDLP_PROXY") or "").strip() or None)

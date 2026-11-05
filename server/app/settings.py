@@ -53,6 +53,8 @@ FIELDS = (
     Field("failure_threshold", "Failed attempts before pausing a task (N)", "int", "Queue", 4, 1, 100,
           hint="Counted per task: bot_check, internal and incomplete fully, network and timeout a quarter. "
                "Also needs failures from two different workers (one if only one worker is active)."),
+    Field("download_block_minutes", "Pause a worker's downloads after bot checks on 2 videos for", "int", "Queue", 60, 0, 1440,
+          unit="minutes", hint="Scans continue. Its tasks go to the next tier at once. 0 switches this off."),
     Field("task_reopen_hours", "A paused task reopens by itself after", "int", "Queue", 6, 1, 168, unit="hours"),
     Field("worker_online_seconds", "Worker counts as online if seen within", "int", "Workers", 120, 30, 3600,
           unit="seconds"),

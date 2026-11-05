@@ -1,14 +1,16 @@
 """Runs one claimed task: heartbeat in the background, execute, report. Never raises on task errors."""
 
+import dataclasses
 import logging
 import threading
+import time
 import traceback
 
 from pn_shared.api import FailRequest, ScanResult, TaskInfo
 
 from .client import ApiClient, AuthError, ServerError, TaskLost
 from .config import Config
-from .download import Progress, run_download
+from .download import Progress, deliver, run_download
 from .process import Failure, Lost
 from .scan import scan_playlist
 
@@ -38,17 +40,33 @@ class Heartbeat(threading.Thread):
                 log.exception("Task %d: unexpected heartbeat error", self.task_id)
 
 
-def _report_failure(client: ApiClient, task: TaskInfo, error_class: str, message: str, retry_after: int | None = None) -> None:
+def _report_failure(client: ApiClient, task: TaskInfo, error_class: str, message: str, retry_after: int | None = None,
+                    config: Config | None = None, lost: threading.Event | None = None, pause=time.sleep) -> bool:
+    """Tell the server the task failed; an unreachable server (a restart) is waited out so it learns the result."""
+    request = FailRequest(error_class=error_class, message=message[:4000], retry_after_seconds=retry_after)
     try:
-        reply = client.fail(task.id, FailRequest(error_class=error_class, message=message[:4000], retry_after_seconds=retry_after))
+        # the lease is probably gone by the time a long outage ends, so the report does not wait as long as an upload
+        config = dataclasses.replace(config, delivery_timeout=min(config.delivery_timeout, 120.0)) if config else Config("http://x", "x")
+        reply = deliver(lambda: client.fail(task.id, request), lost or threading.Event(), config,
+                        f"Task {task.id}: reporting the failure", pause)
         log.info("Task %d failed (%s); the server says: %s", task.id, error_class, reply.state)
+        return True
+    except (Failure, Lost):
+        log.warning("Task %d: could not report the failure, the server stayed unreachable; the server is told when "
+                    "it is back", task.id)
+        return False
     except TaskLost:
         log.warning("Task %d: could not report the failure, it is no longer ours", task.id)
+        return True
     except (ServerError, AuthError) as exc:
-        log.warning("Task %d: could not report the failure (%s); the lease will expire", task.id, exc)
+        log.warning("Task %d: could not report the failure (%s); the server is told when it is back", task.id, exc)
+        return False
 
 
-def run_task(client: ApiClient, task: TaskInfo, config: Config) -> None:
+def run_task(client: ApiClient, task: TaskInfo, config: Config) -> bool:
+    """Run the task. Returns False if the result could not be delivered (the server was unreachable), so the caller can
+    tell the server later that the task was dropped."""
+    delivered = True
     lost, stop, progress = threading.Event(), threading.Event(), Progress()
     interval = config.heartbeat_interval or max(1.0, min(60.0, task.lease_seconds / 3))
     heartbeat = Heartbeat(client, task.id, interval, lost, stop, progress)
@@ -69,16 +87,18 @@ def run_task(client: ApiClient, task: TaskInfo, config: Config) -> None:
         else:
             raise Failure("internal", f"this worker cannot run {task.type} tasks")
     except Failure as failure:
-        _report_failure(client, task, failure.error_class, failure.message, failure.retry_after)
+        delivered = _report_failure(client, task, failure.error_class, failure.message, failure.retry_after, config, lost)
     except (Lost, TaskLost):
         log.warning("Task %d: lease lost, result dropped", task.id)
     except (ServerError, AuthError) as exc:
-        log.warning("Task %d: could not deliver the result (%s); the lease will expire and the task is retried", task.id, exc)
+        delivered = False
+        log.warning("Task %d: could not deliver the result (%s); the server is told at the next call", task.id, exc)
     except BaseException as exc:  # noqa: BLE001 - a task must never kill the worker
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
         log.exception("Task %d: unexpected error", task.id)
-        _report_failure(client, task, "internal", "".join(traceback.format_exception_only(type(exc), exc)).strip())
+        delivered = _report_failure(client, task, "internal", "".join(traceback.format_exception_only(type(exc), exc)).strip(), None, config, lost)
     finally:
         stop.set()
         heartbeat.join(5)
+    return delivered

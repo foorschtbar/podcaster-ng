@@ -107,7 +107,7 @@ def claim(body: ClaimRequest, request: Request, worker: dict = Depends(authentic
     conn = connect(config.db_path)
     try:
         defaults = settings.get_all(conn, {"base_url": config.base_url})
-        result = queue.claim(conn, worker, sorted(set(body.types)), defaults, defaults["lease_seconds"])
+        result = queue.claim(conn, worker, sorted(set(body.types)), defaults, defaults["lease_seconds"], dropped=body.dropped)
         if result.task is None:
             return ClaimResponse(retry_after_seconds=result.retry_after)
         task = result.task

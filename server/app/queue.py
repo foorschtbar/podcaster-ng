@@ -27,7 +27,10 @@ DEFAULT_NOT_YET_AVAILABLE = 1800
 SCAN_RETENTION_DAYS = 14
 RETRYABLE = {"bot_check", "network", "timeout", "internal", "incomplete"}
 PREMIERE_STATES = {"is_upcoming", "is_live", "post_live"}
-COOLDOWN_SECONDS = 600   # a worker does not get a task back that it has just failed
+COOLDOWN_SECONDS = 600
+BLOCK_WINDOW_SECONDS = 1800      # bot checks on this many different videos within the window block a worker's downloads
+BLOCK_VIDEOS = 2
+SUGGEST_HOURS = 24               # a bot check this recent decides where a retry starts   # a worker does not get a task back that it has just failed
 # Classes whose failure makes the task visible to the next tier at once. network/timeout are retried with
 # backoff on the same tier; not_yet_available, private and removed never escalate.
 ESCALATING = {"bot_check", "internal", "incomplete"}
@@ -43,11 +46,12 @@ class Policy:
     escalation_deadline_s: int = 600
     notify_new_episode: bool = False
     base_url: str = ""
+    block_minutes: int = 60
 
     @classmethod
     def from_settings(cls, s: dict) -> "Policy":
         return cls(int(s["failure_threshold"]), int(s["task_reopen_hours"]), int(s["escalation_deadline_min"]) * 60,
-                   bool(s.get("telegram_new_episode")), s.get("base_url") or "")
+                   bool(s.get("telegram_new_episode")), s.get("base_url") or "", int(s.get("download_block_minutes", 60)))
 
 
 DEFAULT_POLICY = Policy()
@@ -167,9 +171,45 @@ def _escalate_overdue(conn: sqlite3.Connection, now: datetime, policy: Policy) -
     return moved
 
 
+def _escalate_blocked(conn: sqlite3.Connection, now: datetime) -> int:
+    """Pending downloads whose whole tier is download-blocked move up at once, if a higher tier has a worker."""
+    rows = conn.execute(
+        "SELECT t.id, t.tier FROM tasks t WHERE t.state = 'pending' AND t.type = 'download' "
+        "AND NOT EXISTS (SELECT 1 FROM workers w WHERE w.active = 1 AND w.tier <= t.tier AND w.tier >= t.min_tier "
+        "AND (w.download_blocked_until IS NULL OR w.download_blocked_until <= ?))", (ts(now),)).fetchall()
+    moved = 0
+    for r in rows:
+        new = _escalate(conn, r["id"], r["tier"], now, f"every tier {r['tier']} worker has paused its downloads after bot checks")
+        if new is not None:
+            conn.execute("UPDATE tasks SET not_before = NULL WHERE id = ?", (r["id"],))
+            moved += 1
+    return moved
+
+
 def escalate_overdue(conn: sqlite3.Connection, now: datetime | None = None, policy: Policy = DEFAULT_POLICY) -> int:
+    now = now or utcnow()
     with transaction(conn):
-        return _escalate_overdue(conn, now or utcnow(), policy)
+        return _escalate_overdue(conn, now, policy) + _escalate_blocked(conn, now)
+
+
+def _maybe_block(conn: sqlite3.Connection, worker_id: int, now: datetime, policy: Policy) -> None:
+    """Bot checks on several different videos in a short time mean the worker's address is blocked, not one video:
+    stop its downloads for a while (it keeps scanning) instead of hammering YouTube from a blocked address."""
+    if policy.block_minutes <= 0:
+        return
+    since = ts(now - timedelta(seconds=BLOCK_WINDOW_SECONDS))
+    videos = conn.execute("SELECT COUNT(DISTINCT t.video_id) FROM attempts a JOIN tasks t ON t.id = a.task_id "
+                          "WHERE a.worker_id = ? AND a.result = 'failed' AND a.error_class = 'bot_check' AND t.type = 'download' "
+                          "AND a.ended_at >= ?", (worker_id, since)).fetchone()[0]
+    row = conn.execute("SELECT name, download_blocked_until FROM workers WHERE id = ?", (worker_id,)).fetchone()
+    if videos < BLOCK_VIDEOS or row is None or (row["download_blocked_until"] or "") > ts(now):
+        return
+    until = ts(now + timedelta(minutes=policy.block_minutes))
+    conn.execute("UPDATE workers SET download_blocked_until = ? WHERE id = ?", (until, worker_id))
+    notifications.enqueue(conn, "worker_blocked", f"worker_blocked:{worker_id}:{until}",
+                          f"⏸ Worker {row['name']} got bot checks on {videos} different videos and pauses its downloads for "
+                          f"{policy.block_minutes} min (scans continue). Its tasks go to the next tier.", now)
+    _escalate_blocked(conn, now)
 
 
 def _short(text: str | None, limit: int) -> str:
@@ -216,16 +256,17 @@ def _assess(conn: sqlite3.Connection, task_id: int, now: datetime, policy: Polic
     return True
 
 
-def _reopen(conn: sqlite3.Connection, task_id: int, now: datetime, how: str) -> None:
-    """Make a paused or closed task pending again with a clean slate: tier 1, no failures counted."""
+def _reopen(conn: sqlite3.Connection, task_id: int, now: datetime, how: str, tier: int = 1) -> None:
+    """Make a paused or closed task pending again with a clean slate: no failures counted, at tier 1 (visible to
+    everyone) or, for a manual retry, starting at ``tier`` (only workers of that tier and above see it)."""
     last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM attempts WHERE task_id = ?", (task_id,)).fetchone()[0]
     try:
-        conn.execute("UPDATE tasks SET state = 'pending', tier = 1, tier_since = ?, not_before = NULL, pause_reason = NULL, "
-                     "reopen_at = NULL, reset_attempt_id = ?, failures = 0, finished_at = NULL, updated_at = ? WHERE id = ?",
-                     (ts(now), last, ts(now), task_id))
+        conn.execute("UPDATE tasks SET state = 'pending', tier = ?, min_tier = ?, tier_since = ?, not_before = NULL, "
+                     "pause_reason = NULL, reopen_at = NULL, reset_attempt_id = ?, failures = 0, finished_at = NULL, updated_at = ? "
+                     "WHERE id = ?", (tier, tier, ts(now), last, ts(now), task_id))
     except sqlite3.IntegrityError:
         raise BadState("another scan of this podcast is already open") from None
-    _event(conn, task_id, now, "reopened", how)
+    _event(conn, task_id, now, "reopened", how + (f", starting at tier {tier}" if tier > 1 else ""))
 
 
 def reopen_due(conn: sqlite3.Connection, now: datetime | None = None) -> int:
@@ -319,7 +360,7 @@ def _download_delay(limits: dict, usage, now: datetime, podcast_id: str) -> int:
 
 
 def claim(conn: sqlite3.Connection, worker: dict, types: list[str], defaults: dict, lease_seconds: int,
-          now: datetime | None = None) -> Claim:
+          now: datetime | None = None, dropped: tuple[int, ...] | list[int] = ()) -> Claim:
     """Atomically hand the oldest eligible task to the worker, or say when to ask again.
 
     Rules: one task at a time per worker; only pending tasks that are due (not_before) of active
@@ -335,19 +376,33 @@ def claim(conn: sqlite3.Connection, worker: dict, types: list[str], defaults: di
     with transaction(conn):
         _expire(conn, now, policy)
         _escalate_overdue(conn, now, policy)
+        _escalate_blocked(conn, now)
+        # Tasks the worker says it dropped (it could not deliver the result): take them back at once.
+        for task_id in dropped:
+            row = conn.execute("SELECT id FROM tasks WHERE id = ? AND claimed_by = ? AND state = 'claimed'",
+                               (task_id, worker["id"])).fetchone()
+            if row:
+                conn.execute("UPDATE tasks SET state = 'pending', claimed_by = NULL, lease_until = NULL, progress = '', "
+                             "tier_since = ?, updated_at = ? WHERE id = ?", (ts(now), ts(now), task_id))
+                _close_open_attempt(conn, task_id, now, "the worker dropped this task (it could not deliver the result)")
         if conn.execute("SELECT 1 FROM tasks WHERE claimed_by = ? AND state = 'claimed'", (worker["id"],)).fetchone():
+            return Claim(None, IDLE_HINT)
+        blocked = conn.execute("SELECT download_blocked_until FROM workers WHERE id = ?", (worker["id"],)).fetchone()
+        if blocked and blocked[0] and blocked[0] > ts(now):
+            types = [t for t in types if t != "download"]
+        if not types:
             return Claim(None, IDLE_HINT)
         marks = ",".join("?" * len(types))
         candidates = conn.execute(
             "SELECT t.*, p.pause_min_s AS p_pause_min, p.pause_max_s AS p_pause_max, p.downloads_per_hour AS p_dph "
             f"FROM tasks t JOIN podcasts p ON p.id = t.podcast_id WHERE t.state = 'pending' AND t.type IN ({marks}) "
-            "AND (t.not_before IS NULL OR t.not_before <= ?) AND p.active = 1 AND t.tier >= ? "
+            "AND (t.not_before IS NULL OR t.not_before <= ?) AND p.active = 1 AND t.tier >= ? AND t.min_tier <= ? "
             # cool-down: not a task this worker just failed, but only if some other worker could take it instead
             "AND NOT (EXISTS (SELECT 1 FROM attempts a WHERE a.task_id = t.id AND a.worker_id = ? AND a.id > t.reset_attempt_id "
             "AND a.result = 'failed' AND a.ended_at > ?) "
             "AND EXISTS (SELECT 1 FROM workers o WHERE o.active = 1 AND o.id != ? AND o.tier <= t.tier)) "
             "ORDER BY (t.type != 'scan'), t.id LIMIT 100",
-            [*types, ts(now), worker["tier"], worker["id"], ts(now - timedelta(seconds=COOLDOWN_SECONDS)), worker["id"]]).fetchall()
+            [*types, ts(now), worker["tier"], worker["tier"], worker["id"], ts(now - timedelta(seconds=COOLDOWN_SECONDS)), worker["id"]]).fetchall()
         wait: int | None = None
         usage = None
         for c in candidates:
@@ -535,8 +590,13 @@ def fail(conn: sqlite3.Connection, task_id: int, worker_id: int, error_class: st
             if error_class in ESCALATING:
                 row = conn.execute("SELECT tier FROM workers WHERE id = ?", (worker_id,)).fetchone()
                 if row is None or row["tier"] >= task["tier"]:  # a failure of the current (or a higher) tier
-                    _escalate(conn, task_id, task["tier"], now, f"a tier {row['tier'] if row else task['tier']} worker failed it "
-                                                              f"({error_class})")
+                    new = _escalate(conn, task_id, task["tier"], now, f"a tier {row['tier'] if row else task['tier']} worker "
+                                                                      f"failed it ({error_class})")
+                    if new is not None:  # handed over: the next tier may take it right away, the backoff is for the same tier
+                        conn.execute("UPDATE tasks SET not_before = NULL WHERE id = ?", (task_id,))
+                        not_before = None
+            if error_class == "bot_check" and task["type"] == "download":
+                _maybe_block(conn, worker_id, now, policy)
             if result == "failed" and _assess(conn, task_id, now, policy):
                 state, not_before = "paused", None
         return state, not_before
@@ -571,19 +631,44 @@ def release(conn: sqlite3.Connection, task_id: int, now: datetime | None = None)
         _close_open_attempt(conn, task_id, now, "released manually")
 
 
-def retry(conn: sqlite3.Connection, task_id: int, now: datetime | None = None) -> None:
-    """Make a pending (waiting), paused or closed task pending and due again."""
+def active_tiers(conn: sqlite3.Connection) -> list[int]:
+    return [r[0] for r in conn.execute("SELECT DISTINCT tier FROM workers WHERE active = 1 ORDER BY tier")]
+
+
+def suggested_tier(conn: sqlite3.Connection, task_id: int, now: datetime | None = None) -> int:
+    """Where a retry should start: the tier above the highest one that recently failed this task with a bot check
+    (or another error that escalates), if some active worker is there; otherwise tier 1."""
+    now = now or utcnow()
+    marks = ",".join("?" * len(ESCALATING))
+    top = conn.execute(f"SELECT MAX(w.tier) FROM attempts a JOIN workers w ON w.id = a.worker_id WHERE a.task_id = ? "
+                       f"AND a.result = 'failed' AND a.error_class IN ({marks}) AND a.ended_at > ?",
+                       [task_id, *sorted(ESCALATING), ts(now - timedelta(hours=SUGGEST_HOURS))]).fetchone()[0]
+    return (_next_tier(conn, top) if top else None) or 1
+
+
+def retry(conn: sqlite3.Connection, task_id: int, now: datetime | None = None, tier: int | None = None) -> int:
+    """Make a pending (waiting), paused or closed task pending again and due now. Returns the tier it starts at.
+
+    ``tier`` (default: ``suggested_tier``) is where it starts: above 1 only workers of that tier see it first, so a
+    tier that is known to be blocked is skipped. Raises BadState if no active worker has that tier.
+    """
     now = now or utcnow()
     with transaction(conn):
         task = _get(conn, task_id)
         if task["state"] not in ("pending", "paused", "closed"):
             raise BadState("only a waiting, paused or closed task can be retried")
+        if tier is None:
+            tier = suggested_tier(conn, task_id, now) if task["type"] == "download" else 1
+        if tier != 1 and tier not in active_tiers(conn):
+            raise BadState(f"no active worker has tier {tier}")
         if task["state"] == "pending":  # waiting for not_before or a backoff: make it due now, with a clean slate
             last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM attempts WHERE task_id = ?", (task_id,)).fetchone()[0]
-            conn.execute("UPDATE tasks SET not_before = NULL, tier_since = ?, reset_attempt_id = ?, updated_at = ? WHERE id = ?",
-                         (ts(now), last, ts(now), task_id))
+            conn.execute("UPDATE tasks SET not_before = NULL, tier = ?, min_tier = ?, tier_since = ?, reset_attempt_id = ?, "
+                         "updated_at = ? WHERE id = ?", (tier, tier, ts(now), last, ts(now), task_id))
+            _event(conn, task_id, now, "reopened", "retried manually" + (f", starting at tier {tier}" if tier > 1 else ""))
         else:
-            _reopen(conn, task_id, now, "retried manually")
+            _reopen(conn, task_id, now, "retried manually", tier)
+        return tier
 
 
 def close(conn: sqlite3.Connection, task_id: int, now: datetime | None = None) -> None:
@@ -687,7 +772,7 @@ def requeue_download(conn: sqlite3.Connection, podcast_id: str, video_id: str, t
         last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM attempts WHERE task_id = ?", (task["id"],)).fetchone()[0]
         conn.execute("UPDATE tasks SET state = 'pending', tier = 1, tier_since = ?, not_before = NULL, claimed_by = NULL, "
                      "lease_until = NULL, pause_reason = NULL, reopen_at = NULL, reset_attempt_id = ?, failures = 0, "
-                     "progress = '', finished_at = NULL, title = ?, updated_at = ? WHERE id = ?",
+                     "min_tier = 1, progress = '', finished_at = NULL, title = ?, updated_at = ? WHERE id = ?",
                      (ts(now), last, title or task["title"], ts(now), task["id"]))
         _event(conn, task["id"], now, "reopened", "download requested again")
         return task["id"]

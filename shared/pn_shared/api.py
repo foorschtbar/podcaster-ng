@@ -53,6 +53,9 @@ VideoId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 
 class ClaimRequest(BaseModel):
     types: list[TaskType] = Field(default_factory=lambda: ["scan"], min_length=1, max_length=2)
+    # Tasks this worker gave up on without being able to tell the server (for instance because it was restarting).
+    # The server takes them back at once instead of waiting for their lease to run out.
+    dropped: list[int] = Field(default_factory=list, max_length=20)
 
 
 class TaskPodcast(BaseModel):

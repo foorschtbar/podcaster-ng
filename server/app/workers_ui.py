@@ -3,7 +3,7 @@
 from fastapi import Depends, Path, Request
 from fastapi.responses import HTMLResponse
 
-from . import settings, workers
+from . import queue, settings, workers
 from .web import Session, db, env_defaults, protected, redirect, render, require_session, templates
 
 FLASH = {"updated": "Worker saved.", "activated": "Worker activated.", "deactivated": "Worker deactivated.",
@@ -34,7 +34,8 @@ def worker_cards(conn, defaults: dict) -> list[dict]:
     cards = []
     for row in workers.list_all(conn):
         cards.append({"row": row, "status": workers.status(row, online), "seen": workers.seconds_since_seen(row),
-                      "capabilities": workers.capabilities_of(row), "tools": workers.tools_of(row)})
+                      "capabilities": workers.capabilities_of(row), "tools": workers.tools_of(row),
+                      "blocked_until": row["download_blocked_until"] if (row["download_blocked_until"] or "") > queue.ts(queue.utcnow()) else None})
     return cards
 
 

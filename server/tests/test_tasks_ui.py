@@ -181,3 +181,65 @@ def test_tasks_require_login_and_csrf(tmp_path):
         do_login(anon)
         for path in ("/tasks/1/release", "/tasks/1/retry", "/tasks/1/close", "/podcasts/abgt/scan"):
             assert anon.post(path).status_code == 403
+
+
+# --- retry with a chosen tier --------------------------------------------------------------------------------------
+
+def two_tiers(c):
+    conn = connect(c.db)
+    local, home = add_worker(conn, "local", tier=1), add_worker(conn, "home", tier=2)
+    add_podcast(conn, "tt", pause_min_s=0, pause_max_s=0, downloads_per_hour=1000)
+    tid = add_download(conn, "tt", "vt")
+    t = claim(conn, local).task
+    queue.fail(conn, t["id"], local["id"], "bot_check", "Sign in to confirm you're not a bot", policy=queue.DEFAULT_POLICY)
+    conn.execute("UPDATE tasks SET tier = 1 WHERE id = ?", (tid,))
+    conn.close()
+    return tid
+
+
+def test_the_task_page_offers_the_tiers_and_suggests_the_next_one(c):
+    tid = two_tiers(c)
+    page = c.get(f"/tasks/{tid}").text
+    assert 'name="tier"' in page and "tier 1 (all workers)" in page
+    assert re.search(r'<option value="2" selected>tier 2 only – suggested</option>', page)
+
+
+def test_the_tier_choice_is_hidden_with_a_single_tier(c):
+    conn = connect(c.db)
+    add_worker(conn, "only", tier=1)
+    tid = add_download(conn, "abgt", "v1")
+    conn.close()
+    assert 'name="tier"' not in c.get(f"/tasks/{tid}").text
+
+
+def test_retry_with_a_chosen_tier(c):
+    tid = two_tiers(c)
+    assert post(c, f"/tasks/{tid}/retry", tier="2").headers["location"].endswith("msg=retried")
+    row = q(c, lambda x: task(x, tid))
+    assert (row["tier"], row["min_tier"], row["state"]) == (2, 2, "pending")
+    assert "only" in c.get(f"/tasks/{tid}").text and "workers of tier 2" in c.get(f"/tasks/{tid}").text
+    assert post(c, f"/tasks/{tid}/retry", tier="1").status_code == 303
+    assert q(c, lambda x: task(x, tid))["min_tier"] == 1
+
+
+def test_retry_without_a_choice_uses_the_suggestion(c):
+    tid = two_tiers(c)
+    post(c, f"/tasks/{tid}/retry")
+    assert q(c, lambda x: task(x, tid))["min_tier"] == 2
+
+
+def test_retry_rejects_bad_tiers(c):
+    tid = two_tiers(c)
+    assert post(c, f"/tasks/{tid}/retry", tier="abc").status_code == 422
+    r = post(c, f"/tasks/{tid}/retry", tier="7")
+    assert r.status_code == 409 and "no active worker has tier 7" in r.text
+
+
+def test_the_workers_page_shows_a_paused_download_state(c):
+    conn = connect(c.db)
+    w = add_worker(conn, "blocked-one", tier=1)
+    conn.execute("UPDATE workers SET download_blocked_until = ? WHERE id = ?",
+                 (queue.ts(queue.utcnow() + timedelta(minutes=30)), w["id"]))
+    conn.close()
+    page = c.get("/workers").text
+    assert "downloads paused" in page and "scans continue" in page

@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import Depends, Path, Request
+from fastapi import Depends, Form, Path, Request
 from fastapi.responses import HTMLResponse
 
 from . import podcasts, queue
@@ -60,11 +60,14 @@ def _detail(request, session, task_id, *, status_code=200, error=None, flash=Non
         task = queue.get_task(conn, task_id)
         attempts = queue.attempts_of(conn, task_id) if task else []
         events = queue.events_of(conn, task_id) if task else []
+        tiers = queue.active_tiers(conn)
+        suggested = queue.suggested_tier(conn, task_id) if task and task["type"] == "download" else 1
     if not task:
         return render(request, "not_found.html", session, status_code=404, active="tasks", title="Not found",
                       back="/tasks", back_label="Back to tasks")
     return render(request, "task_detail.html", session, status_code=status_code, active="tasks",
-                  title=f"Task {task_id}", task=task, attempts=attempts, events=events, error=error, flash=flash)
+                  title=f"Task {task_id}", task=task, attempts=attempts, events=events, error=error, flash=flash, tiers=tiers,
+                  suggested=suggested)
 
 
 @protected.get("/tasks/{task_id}", response_class=HTMLResponse, include_in_schema=False)
@@ -89,8 +92,12 @@ def task_release(request: Request, task_id: int = ID, session: Session = Depends
 
 
 @protected.post("/tasks/{task_id}/retry", include_in_schema=False)
-def task_retry(request: Request, task_id: int = ID, session: Session = Depends(require_session)):
-    return _action(request, session, task_id, queue.retry, "retried")
+def task_retry(request: Request, task_id: int = ID, tier: str = Form(""), session: Session = Depends(require_session)):
+    """Retry, optionally starting at a chosen tier (empty: the suggested one)."""
+    if tier and not (tier.isdigit() and 1 <= int(tier) <= 99):
+        return _detail(request, session, task_id, status_code=422, error="Not possible: the tier must be a number.")
+    chosen = int(tier) if tier else None
+    return _action(request, session, task_id, lambda conn, tid: queue.retry(conn, tid, tier=chosen), "retried")
 
 
 @protected.post("/tasks/{task_id}/close", include_in_schema=False)

@@ -13,7 +13,7 @@
       {% if task.not_before %}<dt>Not before</dt><dd>{{ task.not_before }} ({{ task.not_before | until }})</dd>{% endif %}
       {% if task.worker_name %}<dt>Claimed by</dt><dd>{{ task.worker_name }}{% if task.lease_until %}, lease until {{ task.lease_until }} ({{ task.lease_until | until }}){% endif %}</dd>{% endif %}
       {% if task.progress %}<dt>Progress</dt><dd>{{ task.progress }}</dd>{% endif %}
-      <dt>Tier</dt><dd>visible to workers up to tier {{ task.tier }}</dd>
+      <dt>Tier</dt><dd>{% if task.min_tier > 1 %}workers of tier {{ task.min_tier }}{% if task.tier > task.min_tier %} to {{ task.tier }}{% endif %} only{% else %}visible to workers up to tier {{ task.tier }}{% endif %}</dd>
       {% if task.pause_reason %}<dt>Paused</dt><dd>{{ task.pause_reason }}{% if task.reopen_at %}; reopens {{ task.reopen_at }} ({{ task.reopen_at | until }}){% endif %}</dd>{% endif %}
       <dt>Failed attempts</dt><dd>{{ task.failures }}</dd>
       {% if task.finished_at %}<dt>Finished</dt><dd>{{ task.finished_at }}</dd>{% endif %}
@@ -23,7 +23,15 @@
       <form method="post" action="/tasks/{{ task.id }}/release"><input type="hidden" name="csrf_token" value="{{ session.csrf }}"><button type="submit" class="secondary">{{ 'Release (reopen)' if task.state == 'paused' else 'Release' }}</button></form>
       {% endif %}
       {% if task.state in ('pending', 'paused', 'closed') %}
-      <form method="post" action="/tasks/{{ task.id }}/retry"><input type="hidden" name="csrf_token" value="{{ session.csrf }}"><button type="submit" class="secondary">{{ 'Retry now' if task.state == 'pending' else 'Retry' }}</button></form>
+      <form method="post" action="/tasks/{{ task.id }}/retry" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+        {% if task.type == 'download' and tiers | length > 1 %}
+        <label class="inline">Start at
+          <select name="tier">{% for n in tiers %}<option value="{{ n }}"{% if n == suggested %} selected{% endif %}>tier {{ n }}{% if n == 1 %} (all workers){% else %} only{% endif %}{% if n == suggested and n > 1 %} – suggested{% endif %}</option>{% endfor %}</select>
+        </label>
+        {% endif %}
+        <button type="submit" class="secondary">{{ 'Retry now' if task.state == 'pending' else 'Retry' }}</button>
+      </form>
       {% endif %}
       {% if task.state in ('pending', 'claimed', 'paused') %}
       <form method="post" action="/tasks/{{ task.id }}/close"><input type="hidden" name="csrf_token" value="{{ session.csrf }}"><button type="submit" class="danger">Close</button></form>
