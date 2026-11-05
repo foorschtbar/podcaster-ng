@@ -1,0 +1,79 @@
+# Example Compose file for PodcasterNG.
+#
+#   cp compose.example.yml compose.yml      # compose.yml is private: it is ignored by git
+#   cp .env.example .env                    # and fill in at least ADMIN_USER and ADMIN_PASSWORD
+#   mkdir -p data                           # create it yourself, the container runs as UID 1000
+#   docker compose up -d --build
+#
+# As written, the server is only reachable from other containers (no port is published). Either put a
+# reverse proxy in front (see the Traefik block below) or publish a port for a local trial.
+
+name: podcaster-ng
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: podcaster-ng-server
+    container_name: podcaster-ng-server
+    restart: unless-stopped
+    environment:
+      - DATA_DIR=/data
+      - BASE_URL=${BASE_URL:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ADMIN_USER=${ADMIN_USER:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+    volumes:
+      - ./data:/data
+      # Import assistant (only needed once): mount the old Podcaster read-only below /import.
+      # Mount only what is needed (its config and its downloads), not the whole project.
+      # - /path/to/old-podcaster/config.yml:/import/podcaster/config.yml:ro
+      # - /path/to/old-podcaster/data/downloads:/import/podcaster/data/downloads:ro
+    networks:
+      - internal   # lets the optional local worker reach http://server:8080
+    # For a local trial without a reverse proxy (the Secure session cookie then needs https, so this
+    # only serves the public feeds and /healthz; the admin UI needs https, e.g. through a proxy):
+    # ports:
+    #   - "127.0.0.1:8080:8080"
+    #
+    # --- Traefik example: uncomment, adapt, and enable the reverse-proxy network below ---
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.docker.network=reverse-proxy"   # needed because the server is on two networks
+    #   - "traefik.http.routers.podcaster-ng.entrypoints=https"
+    #   - "traefik.http.routers.podcaster-ng.rule=Host(`podcaster-ng.example.org`)"
+    #   - "traefik.http.routers.podcaster-ng.tls.certresolver=<your-resolver>"
+    #   - "traefik.http.services.podcaster-ng.loadbalancer.server.port=8080"
+    # networks:
+    #   - reverse-proxy
+    #   - internal
+
+  # Optional worker on the same host as the server. Create the worker in the admin UI (Workers),
+  # put its token into .env as WORKER_TOKEN and start it with:
+  #   docker compose --profile worker up -d worker
+  # A worker on another machine needs only SERVER_URL and WORKER_TOKEN, see the README.
+  worker:
+    profiles: ["worker"]
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    image: podcaster-ng-worker
+    container_name: podcaster-ng-worker-local
+    restart: unless-stopped
+    environment:
+      - SERVER_URL=http://server:8080
+      - WORKER_TOKEN=${WORKER_TOKEN:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Optional: YTDLP_PROXY=http://vpn-proxy:3128 (only yt-dlp uses it), YTDLP_COOKIES=/run/cookies.txt
+    networks:
+      - internal
+    depends_on:
+      server:
+        condition: service_healthy
+
+networks:
+  internal: {}
+  # reverse-proxy:
+  #   external: true

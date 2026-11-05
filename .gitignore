@@ -1,7 +1,9 @@
 # Local planning docs (concept and implementation steps) are not versioned
 /docs/
 
-# Runtime data and local files
+# Runtime data and local files (compose.yml is the private copy of compose.example.yml)
+/compose.yml
+/compose.override.yml
 /data/
 .env
 __pycache__/
