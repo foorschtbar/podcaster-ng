@@ -1,17 +1,20 @@
 """HTTP client for the server's worker API. Every call has a timeout."""
 
+import time
+
 import httpx
 import pydantic
 
 from pathlib import Path
 from typing import Callable
 
-from pn_shared.api import (ClaimRequest, ClaimResponse, FailRequest, FailResponse, HeartbeatRequest, HeartbeatResponse,
+from pn_shared.api import (ClaimRequest, ClaimResponse, Device, FailRequest, FailResponse, HeartbeatRequest, HeartbeatResponse,
                            HelloRequest, HelloResponse, PingResponse, ScanResult, ScanResultResponse,
                            CompleteRequest, CompleteResponse, FileEntry, UploadResponse)
 
 from . import __version__
 
+DEVICE_EVERY = 30.0   # seconds between machine snapshots sent with heartbeats
 TIMEOUT = httpx.Timeout(connect=10.0, read=20.0, write=20.0, pool=10.0)
 UPLOAD_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=600.0, pool=10.0)  # the server hashes and checks before it answers
 CHUNK = 1 << 20
@@ -50,6 +53,9 @@ def _detail(response: httpx.Response) -> str:
 
 class ApiClient:
     def __init__(self, server_url: str, token: str, transport: httpx.BaseTransport | None = None):
+        self.status_supported = True      # set to False when the server turns out to be older than this feature
+        self.device_source: Callable[[], Device] | None = None   # gives a fresh snapshot for the heartbeat
+        self._device_sent = 0.0
         # trust_env=False: proxy variables meant for yt-dlp (a VPN proxy) must not redirect the calls to the server.
         self._http = httpx.Client(base_url=server_url + "/api/worker", timeout=TIMEOUT, transport=transport, trust_env=False,
                                   headers={"Authorization": f"Bearer {token}",
@@ -89,11 +95,27 @@ class ApiClient:
     def ping(self) -> PingResponse:
         return self._parse(PingResponse, self._call("GET", "/ping"))
 
+    def status(self, device: Device) -> PingResponse | None:
+        """Report the machine's state (also counts as "seen"). An older server does not know it: then nothing is sent."""
+        if not self.status_supported:
+            return None
+        try:
+            return self._parse(PingResponse, self._call("POST", "/status", json=device.model_dump(exclude_none=True)))
+        except ServerError as exc:
+            if "unexpected status 404" in str(exc) or "unexpected status 405" in str(exc):
+                self.status_supported = False
+                return None
+            raise
+
     def claim(self, request: ClaimRequest) -> ClaimResponse:
         return self._parse(ClaimResponse, self._call("POST", "/claim", json=request.model_dump()))
 
     def heartbeat(self, task_id: int, progress: str | None = None) -> HeartbeatResponse:
-        body = HeartbeatRequest(progress=progress).model_dump(exclude_none=True)
+        device = None
+        if self.device_source and self.status_supported and time.monotonic() - self._device_sent >= DEVICE_EVERY:
+            self._device_sent = time.monotonic()
+            device = self.device_source()
+        body = HeartbeatRequest(progress=progress, device=device).model_dump(exclude_none=True)
         return self._parse(HeartbeatResponse, self._call("POST", f"/tasks/{task_id}/heartbeat", json=body))
 
     def scan_result(self, task_id: int, result: ScanResult) -> ScanResultResponse:

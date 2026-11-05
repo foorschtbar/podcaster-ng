@@ -256,7 +256,7 @@ def test_loop_reports_dropped_tasks_with_the_next_claim(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main, "run_task", lambda client, task, config: next(outcomes))
     stop, sleeps = threading.Event(), []
-    monkeypatch.setattr(main, "hello_request", lambda found=None: None)
+    monkeypatch.setattr(main, "hello_request", lambda found=None, device=None: None)
     client = Client([])
     config = Config(server_url="https://x", token="pnw_t", alive_file=str(tmp_path / "alive"))
 

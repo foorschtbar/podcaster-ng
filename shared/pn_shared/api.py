@@ -7,6 +7,25 @@ from pydantic import BaseModel, Field, StringConstraints
 Short = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
 
 
+Text = Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
+
+
+class Device(BaseModel):
+    """What the worker knows about the machine it runs on. Every field is optional and reported best effort."""
+    hostname: Text | None = None
+    os: Text | None = None             # for instance "Debian GNU/Linux 13 (trixie)" (the container's system)
+    kernel: Text | None = None
+    arch: Annotated[str, StringConstraints(strip_whitespace=True, max_length=30)] | None = None
+    cpus: Annotated[float, Field(ge=0, le=4096)] | None = None
+    mem_total_mb: Annotated[int, Field(ge=0, le=100_000_000)] | None = None
+    mem_available_mb: Annotated[int, Field(ge=0, le=100_000_000)] | None = None
+    disk_total_mb: Annotated[int, Field(ge=0, le=1_000_000_000)] | None = None
+    disk_free_mb: Annotated[int, Field(ge=0, le=1_000_000_000)] | None = None
+    uptime_s: Annotated[int, Field(ge=0, le=10**9)] | None = None
+    load1: Annotated[float, Field(ge=0, le=100_000)] | None = None
+    local_ip: Annotated[str, StringConstraints(strip_whitespace=True, max_length=45)] | None = None
+
+
 class HelloRequest(BaseModel):
     worker_version: Short
     ytdlp_version: Short | None = None
@@ -14,6 +33,7 @@ class HelloRequest(BaseModel):
     deno_version: Short | None = None
     capabilities: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]] = Field(
         default_factory=list, max_length=20)
+    device: Device | None = None
 
 
 class WorkerInfo(BaseModel):
@@ -84,6 +104,7 @@ class ClaimResponse(BaseModel):
 
 class HeartbeatRequest(BaseModel):
     progress: Annotated[str, StringConstraints(max_length=200)] | None = None
+    device: Device | None = None       # a fresh snapshot, at most every half minute
 
 
 class HeartbeatResponse(BaseModel):

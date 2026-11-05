@@ -776,3 +776,23 @@ def requeue_download(conn: sqlite3.Connection, podcast_id: str, video_id: str, t
                      (ts(now), last, title or task["title"], ts(now), task["id"]))
         _event(conn, task["id"], now, "reopened", "download requested again")
         return task["id"]
+
+
+def activity(conn: sqlite3.Connection) -> dict[int, dict]:
+    """What each worker is doing: ``{worker_id: {"current": row or None, "last": row or None}}``.
+
+    ``current`` is the task it holds right now (with the start of its open attempt); ``last`` is the most recent attempt
+    it finished. Workers that never did anything are absent.
+    """
+    out: dict[int, dict] = {}
+    for row in conn.execute(
+            "SELECT t.claimed_by AS worker_id, t.id, t.type, t.title, t.video_id, t.progress, t.lease_until, p.name AS podcast_name, "
+            "(SELECT a.started_at FROM attempts a WHERE a.task_id = t.id AND a.result IS NULL ORDER BY a.id DESC LIMIT 1) AS since "
+            "FROM tasks t JOIN podcasts p ON p.id = t.podcast_id WHERE t.state = 'claimed' AND t.claimed_by IS NOT NULL"):
+        out.setdefault(row["worker_id"], {"current": None, "last": None})["current"] = row
+    for row in conn.execute(
+            "SELECT a.worker_id, a.ended_at, a.result, a.error_class, t.id AS task_id, t.type, t.title, t.video_id, p.name AS podcast_name "
+            "FROM attempts a JOIN tasks t ON t.id = a.task_id JOIN podcasts p ON p.id = t.podcast_id "
+            "WHERE a.id IN (SELECT MAX(id) FROM attempts WHERE worker_id IS NOT NULL AND ended_at IS NOT NULL GROUP BY worker_id)"):
+        out.setdefault(row["worker_id"], {"current": None, "last": None})["last"] = row
+    return out

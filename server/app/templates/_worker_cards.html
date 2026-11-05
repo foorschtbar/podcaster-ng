@@ -1,0 +1,57 @@
+<div id="worker-cards" hx-get="/workers/cards" hx-trigger="every 10s" hx-swap="outerHTML">
+  {% if not cards %}<p class="muted">No workers yet.</p>{% endif %}
+  {% for c in cards %}
+  {% set w = c.row %}
+  <article class="card item">
+    <div class="item-head">
+      <a href="/workers/{{ w.id }}"><strong>{{ w.name }}</strong></a>
+      <span class="badge {{ 'on' if c.status == 'online' else 'off' }}">{{ {'online': '● online', 'offline': 'offline', 'never': 'never connected', 'inactive': 'inactive'}[c.status] }}</span>
+    </div>
+    <div class="muted small">Tier {{ w.tier }} · last seen {{ c.seen | ago }}{% if w.version %} · version {{ w.version }}{% endif %}</div>
+    {% if c.version_differs %}<div class="small"><span class="badge warn">version differs</span> the server runs {{ server_version }}; update this worker's image (pull and restart)</div>{% endif %}
+    {% if c.ytdlp_age %}<div class="small"><span class="badge warn">yt-dlp is {{ c.ytdlp_age }} days old</span> downloads often fail with an old yt-dlp; update the worker's image</div>{% endif %}
+    {% set act = c.activity %}
+    <div class="small">
+      {% if act.current %}
+        {% set t = act.current %}
+        <span class="badge on">working</span>
+        <a href="/tasks/{{ t.id }}">{{ 'Scanning' if t.type == 'scan' else 'Downloading' }}</a>
+        {{ t.podcast_name }}{% if t.type == 'download' %} – {{ t.title or t.video_id }}{% endif %}
+        {% if t.progress %}<span class="muted">· {{ t.progress }}</span>{% endif %}
+        {% if t.since %}<span class="muted">· since {{ t.since | until }}</span>{% endif %}
+        {% if c.status == 'offline' %}<span class="muted">· worker offline, the task returns when its lease expires</span>{% endif %}
+      {% elif c.status == 'online' %}
+        <span class="badge off">idle</span>
+        {% if act.last %}<span class="muted">last: <a href="/tasks/{{ act.last.task_id }}">{{ act.last.type }} {{ act.last.result }}{% if act.last.error_class %} ({{ act.last.error_class }}){% endif %}</a> {{ act.last.podcast_name }}{% if act.last.type == 'download' %} – {{ act.last.title or act.last.video_id }}{% endif %}, {{ act.last.ended_at | until }}</span>{% endif %}
+      {% endif %}
+    </div>
+    {% set d = c.device %}
+    {% if d or w.last_ip %}
+    <dl class="facts small">
+      {% if d.os or d.kernel or d.arch %}<dt>System</dt><dd>{{ [d.os, d.kernel and ('kernel ' ~ d.kernel), d.arch] | select | join(' · ') }}</dd>{% endif %}
+      {% if d.hostname %}<dt>Host</dt><dd>{{ d.hostname }}</dd>{% endif %}
+      {% if d.cpus is defined or d.load1 is defined %}<dt>CPU</dt><dd>{% if d.cpus is defined %}{{ d.cpus | round(1) | string | replace('.0', '') }} core(s){% endif %}{% if d.load1 is defined %} · load {{ d.load1 }}{% endif %}</dd>{% endif %}
+      {% if d.mem_total_mb %}<dt>Memory</dt><dd>{{ d.mem_available_mb | size_mb }} free of {{ d.mem_total_mb | size_mb }}</dd>{% endif %}
+      {% if d.disk_total_mb %}<dt>Disk</dt><dd>{{ d.disk_free_mb | size_mb }} free of {{ d.disk_total_mb | size_mb }}</dd>{% endif %}
+      {% if w.last_ip or d.local_ip %}<dt>Address</dt><dd>{% if w.last_ip %}{{ w.last_ip }} <span class="muted">(seen by the server)</span>{% endif %}{% if d.local_ip and d.local_ip != w.last_ip %}{% if w.last_ip %} · {% endif %}{{ d.local_ip }} <span class="muted">(local)</span>{% endif %}</dd>{% endif %}
+      {% if d.uptime_s is defined %}<dt>Uptime</dt><dd>{{ d.uptime_s | span }}</dd>{% endif %}
+      {% if w.device_at %}<dt>Reported</dt><dd>{{ w.device_at | until }}</dd>{% endif %}
+    </dl>
+    {% endif %}
+    {% if c.blocked_until %}<div class="small"><span class="badge warn">downloads paused</span> after bot checks, until {{ c.blocked_until }} ({{ c.blocked_until | until }}); scans continue</div>{% endif %}
+    {% if c.capabilities or c.tools %}
+    <div class="muted small">
+      {% if c.capabilities %}Capabilities: {{ c.capabilities | join(', ') }}{% endif %}
+      {% if c.tools %}{% if c.capabilities %} · {% endif %}{% for name, version in c.tools.items() %}{{ name }} {{ version }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+    </div>
+    {% endif %}
+    <div class="actions">
+      <a class="btn secondary" href="/workers/{{ w.id }}">Edit</a>
+      <form method="post" action="/workers/{{ w.id }}/{{ 'deactivate' if w.active else 'activate' }}">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+        <button type="submit" class="secondary">{{ 'Deactivate' if w.active else 'Activate' }}</button>
+      </form>
+    </div>
+  </article>
+  {% endfor %}
+</div>

@@ -5,31 +5,5 @@
   {% if flash %}<p class="notice" role="status">{{ flash }}</p>{% endif %}
   <p><a class="btn" href="/workers/new">New worker</a></p>
   <p class="small muted">A worker is online if it was seen within the last {{ online_seconds }} seconds. Tier 1 is tried first.</p>
-  {% if not cards %}<p class="muted">No workers yet.</p>{% endif %}
-  {% for c in cards %}
-  {% set w = c.row %}
-  <article class="card item">
-    <div class="item-head">
-      <a href="/workers/{{ w.id }}"><strong>{{ w.name }}</strong></a>
-      <span class="badge {{ 'on' if c.status == 'online' else 'off' }}">{{ {'online': '● online', 'offline': 'offline', 'never': 'never connected', 'inactive': 'inactive'}[c.status] }}</span>
-    </div>
-    <div class="muted small">Tier {{ w.tier }} · last seen {{ c.seen | ago }}{% if w.version %} · version {{ w.version }}{% endif %}</div>
-    {% if c.version_differs %}<div class="small"><span class="badge warn">version differs</span> the server runs {{ server_version }}; update this worker's image (pull and restart)</div>{% endif %}
-    {% if c.ytdlp_age %}<div class="small"><span class="badge warn">yt-dlp is {{ c.ytdlp_age }} days old</span> downloads often fail with an old yt-dlp; update the worker's image</div>{% endif %}
-    {% if c.blocked_until %}<div class="small"><span class="badge warn">downloads paused</span> after bot checks, until {{ c.blocked_until }} ({{ c.blocked_until | until }}); scans continue</div>{% endif %}
-    {% if c.capabilities or c.tools %}
-    <div class="muted small">
-      {% if c.capabilities %}Capabilities: {{ c.capabilities | join(', ') }}{% endif %}
-      {% if c.tools %}{% if c.capabilities %} · {% endif %}{% for name, version in c.tools.items() %}{{ name }} {{ version }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
-    </div>
-    {% endif %}
-    <div class="actions">
-      <a class="btn secondary" href="/workers/{{ w.id }}">Edit</a>
-      <form method="post" action="/workers/{{ w.id }}/{{ 'deactivate' if w.active else 'activate' }}">
-        <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
-        <button type="submit" class="secondary">{{ 'Deactivate' if w.active else 'Activate' }}</button>
-      </form>
-    </div>
-  </article>
-  {% endfor %}
+  {% include "_worker_cards.html" %}
 {% endblock %}

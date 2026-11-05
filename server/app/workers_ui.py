@@ -28,6 +28,32 @@ def ago(seconds) -> str:
 templates.env.filters["ago"] = ago
 
 
+def size_mb(mb) -> str:
+    """MB as '812 MB' or '3.4 GB' or '1.2 TB'."""
+    if mb is None:
+        return ""
+    mb = float(mb)
+    for limit, unit, size in ((1024, "MB", 1), (1024 * 1024, "GB", 1024), (10**12, "TB", 1024 * 1024)):
+        if mb < limit:
+            return f"{mb / size:.0f} {unit}" if unit == "MB" or mb / size >= 100 else f"{mb / size:.1f} {unit}"
+    return ""
+
+
+def span(seconds) -> str:
+    """Seconds as '5 min', '3 h' or '2 days'."""
+    if seconds is None:
+        return ""
+    seconds = int(seconds)
+    for limit, unit, size in ((90, "s", 1), (90 * 60, "min", 60), (36 * 3600, "h", 3600), (10**12, "days", 86400)):
+        if seconds < limit:
+            return f"{max(1, round(seconds / size))} {unit}"
+    return ""
+
+
+templates.env.filters["size_mb"] = size_mb
+templates.env.filters["span"] = span
+
+
 def _old_ytdlp(tools: dict) -> int | None:
     age = workers.ytdlp_age_days(tools)
     return age if age is not None and age > workers.YTDLP_OLD_DAYS else None
@@ -37,9 +63,11 @@ def worker_cards(conn, defaults: dict) -> list[dict]:
     """Workers with their computed status; also used by the dashboard."""
     online = defaults["worker_online_seconds"]
     cards = []
+    busy = queue.activity(conn)
     for row in workers.list_all(conn):
         cards.append({"row": row, "status": workers.status(row, online), "seen": workers.seconds_since_seen(row),
                       "capabilities": workers.capabilities_of(row), "tools": workers.tools_of(row),
+                      "device": workers.device_of(row), "activity": busy.get(row["id"], {"current": None, "last": None}),
                       "version_differs": workers.version_differs(row["version"], __version__),
                       "ytdlp_age": _old_ytdlp(workers.tools_of(row)),
                       "blocked_until": row["download_blocked_until"] if (row["download_blocked_until"] or "") > queue.ts(queue.utcnow()) else None})
@@ -80,6 +108,15 @@ def worker_list(request: Request, msg: str | None = None, session: Session = Dep
         cards = worker_cards(conn, defaults)
     return render(request, "workers.html", session, active="workers", title="Workers", cards=cards,
                   online_seconds=defaults["worker_online_seconds"], flash=FLASH.get(msg or ""), server_version=__version__)
+
+
+@protected.get("/workers/cards", response_class=HTMLResponse, include_in_schema=False)
+def worker_cards_partial(request: Request, session: Session = Depends(require_session)):
+    """Only the cards, for the page's live refresh."""
+    with db(request) as conn:
+        defaults = settings.get_all(conn, env_defaults(request))
+        cards = worker_cards(conn, defaults)
+    return render(request, "_worker_cards.html", session, cards=cards, server_version=__version__)
 
 
 @protected.get("/workers/new", response_class=HTMLResponse, include_in_schema=False)

@@ -6,9 +6,9 @@ import random
 import threading
 import time
 
-from pn_shared.api import ClaimRequest, HelloRequest
+from pn_shared.api import ClaimRequest, Device, HelloRequest
 
-from . import __version__, tools
+from . import __version__, sysinfo, tools
 from .client import ApiClient, AuthError, ServerError
 from .config import Config
 from .tasks import run_task
@@ -36,11 +36,11 @@ def supported_types(found: dict[str, str]) -> list[str]:
     return types
 
 
-def hello_request(found: dict[str, str] | None = None) -> HelloRequest:
+def hello_request(found: dict[str, str] | None = None, device: Device | None = None) -> HelloRequest:
     found = tools.detect() if found is None else found
     return HelloRequest(
         worker_version=__version__, ytdlp_version=found.get("ytdlp"), ffmpeg_version=found.get("ffmpeg"),
-        deno_version=found.get("deno"), capabilities=sorted([*found, *supported_types(found)]))
+        deno_version=found.get("deno"), capabilities=sorted([*found, *supported_types(found)]), device=device)
 
 
 def _touch(path: str) -> None:
@@ -67,12 +67,21 @@ def run(config: Config, stop: threading.Event, client: ApiClient | None = None, 
     types = supported_types(found)
     idle = 0
     dropped: list[int] = []   # tasks given up because their result could not be delivered; sent with the next claim
+    def snapshot() -> Device:
+        return sysinfo.collect(config.work_dir, config.server_url)
+
+    client.device_source = snapshot          # heartbeats of long tasks carry a fresh snapshot
+    status_due = 0.0
     log.info("Worker %s starting, server %s", __version__, config.server_url)
     while not stop.is_set():
         _touch(config.alive_file)  # the container health check looks at this file
         try:
+            if connected and time.monotonic() >= status_due:
+                status_due = time.monotonic() + interval
+                client.status(snapshot())        # machine state; also counts as "seen"
             if not connected:
-                reply = client.hello(hello_request(found))
+                reply = client.hello(hello_request(found, snapshot()))
+                status_due = time.monotonic() + (config.ping_interval or float(reply.ping_interval_seconds))
                 connected = True
                 idle = 0
                 interval = config.ping_interval or float(reply.ping_interval_seconds)

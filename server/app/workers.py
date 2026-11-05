@@ -7,6 +7,7 @@ import secrets
 import sqlite3
 from datetime import date, datetime, timezone
 
+from .scrub import clean
 from .validate import parse_int
 
 TOKEN_PREFIX = "pnw_"
@@ -114,8 +115,27 @@ def find_by_token(conn: sqlite3.Connection, token: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM workers WHERE token_hash = ?", (hash_token(token),)).fetchone()
 
 
-def touch(conn: sqlite3.Connection, worker_id: int, moment: datetime | None = None) -> None:
-    conn.execute("UPDATE workers SET last_seen = ? WHERE id = ?", (_stamp(moment), worker_id))
+def touch(conn: sqlite3.Connection, worker_id: int, moment: datetime | None = None, ip: str | None = None) -> None:
+    if ip is None:
+        conn.execute("UPDATE workers SET last_seen = ? WHERE id = ?", (_stamp(moment), worker_id))
+    else:
+        conn.execute("UPDATE workers SET last_seen = ?, last_ip = ? WHERE id = ?", (_stamp(moment), ip[:45], worker_id))
+
+
+def record_device(conn: sqlite3.Connection, worker_id: int, device: dict, moment: datetime | None = None) -> None:
+    """Store what the worker reported about its machine (only the fields it sent; text is cleaned)."""
+    clean_device = {k: (clean(v, 100) if isinstance(v, str) else v) for k, v in device.items() if v is not None}
+    if clean_device:
+        conn.execute("UPDATE workers SET device = ?, device_at = ? WHERE id = ?",
+                     (json.dumps(clean_device), _stamp(moment), worker_id))
+
+
+def device_of(row: sqlite3.Row) -> dict:
+    try:
+        data = json.loads(row["device"])
+        return data if isinstance(data, dict) else {}
+    except (ValueError, TypeError):
+        return {}
 
 
 def record_hello(conn: sqlite3.Connection, worker_id: int, version: str, capabilities: list[str],

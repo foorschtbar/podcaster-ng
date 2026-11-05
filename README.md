@@ -79,6 +79,8 @@ The worker calls `/hello` on start and `/ping` every 30 s, has a timeout on ever
 
 Status: *online* if the worker was seen within the last 120 s (Settings → Workers), otherwise *offline*; *never connected* before the first call; *inactive* when deactivated. The dashboard lists the workers too.
 
+Each worker card also shows what it is doing (*working* on a scan or download, with podcast, title, progress and start, or *idle* with its last task) and the machine it runs on: OS, host name, CPUs and load, free memory and disk space (of the container's limit and of the work volume), the address the server sees its calls from, its local address and uptime. The cards refresh every 10 s. Inside a container the OS and kernel are those of the image and the host kernel, and the "local" address is the container's. The country is not shown: it would need a lookup service, and this server sends nothing about its workers to third parties.
+
 ### Worker API v1
 
 Header `Authorization: Bearer <token>`, base path `/api/worker`, separate from the public and admin routes. Schemas: `shared/pn_shared/api.py`.
@@ -87,6 +89,7 @@ Header `Authorization: Bearer <token>`, base path `/api/worker`, separate from t
 |---|---|
 | `POST /hello` | worker reports its version, yt-dlp/ffmpeg/deno versions and capabilities; the reply has server time, API version, the worker's effective pacing limits, lease duration and ping interval |
 | `GET /ping` | authenticated liveness call |
+| `POST /status` | the worker's machine state (`Device`: host name, OS, kernel, architecture, CPUs, memory and disk, load, uptime, local address), sent every ping interval; counts as *seen*. The same snapshot also goes with `/hello` and, at most every 30 s, with heartbeats of long tasks. A worker talking to an older server stops sending it after one `404` |
 | `POST /claim` | ask for work (`{"types": ["scan"]}`); the reply holds a task or `retry_after_seconds` |
 | `POST /tasks/{id}/heartbeat` | extend the lease of the claimed task (`409` if it is not yours any more) |
 | `POST /tasks/{id}/scan-result` | report the videos of a playlist scan |

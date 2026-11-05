@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from starlette.concurrency import run_in_threadpool
 
 from pn_shared import API_VERSION
-from pn_shared.api import (ClaimRequest, ClaimResponse, FailRequest, FailResponse, HeartbeatRequest, HeartbeatResponse,
+from pn_shared.api import (ClaimRequest, ClaimResponse, Device, FailRequest, FailResponse, HeartbeatRequest, HeartbeatResponse,
                            HelloRequest, HelloResponse, Pacing, PingResponse, ScanResult, ScanResultResponse, TaskInfo,
                            TaskPodcast, WorkerInfo, CompleteRequest, CompleteResponse, PackageRole, Sha256, UploadResponse)
 
@@ -56,7 +56,7 @@ def authenticate(request: Request) -> dict:
             raise HTTPException(403, "Worker is deactivated")
         if not app.state.worker_rate_limiter.allow(row["id"]):
             raise HTTPException(429, "Rate limit exceeded", headers={"Retry-After": "60"})
-        workers.touch(conn, row["id"])
+        workers.touch(conn, row["id"], ip=client)
         return dict(row)
     finally:
         conn.close()
@@ -64,6 +64,15 @@ def authenticate(request: Request) -> dict:
 
 @router.get("/ping", response_model=PingResponse)
 def ping(worker: dict = Depends(authenticate)) -> PingResponse:
+    return PingResponse(server_time=_server_time())
+
+
+@router.post("/status", response_model=PingResponse)
+def status(body: Device, request: Request, worker: dict = Depends(authenticate)) -> PingResponse:
+    """The worker's machine state, sent regularly. Counts as "seen" like a ping."""
+    def run(conn):
+        workers.record_device(conn, worker["id"], body.model_dump(exclude_none=True))
+    _with_conn(request, run)
     return PingResponse(server_time=_server_time())
 
 
@@ -75,6 +84,8 @@ def hello(body: HelloRequest, request: Request, worker: dict = Depends(authentic
     conn = connect(config.db_path)
     try:
         workers.record_hello(conn, worker["id"], body.worker_version, body.capabilities, tools)
+        if body.device:
+            workers.record_device(conn, worker["id"], body.device.model_dump(exclude_none=True))
         defaults = settings.get_all(conn, {"base_url": config.base_url})
     finally:
         conn.close()
@@ -140,6 +151,8 @@ def _with_conn(request: Request, call):
 def heartbeat(task_id: int, body: HeartbeatRequest, request: Request, worker: dict = Depends(authenticate)):
     def run(conn):
         lease = settings.get(conn, "lease_seconds")
+        if body.device:
+            workers.record_device(conn, worker["id"], body.device.model_dump(exclude_none=True))
         return HeartbeatResponse(lease_until=queue.heartbeat(conn, task_id, worker["id"], lease, progress=body.progress))
     return _with_conn(request, run)
 
