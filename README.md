@@ -2,15 +2,16 @@
 
 Turns YouTube playlists into podcast feeds. The **server** coordinates and serves (feeds, files, queue, admin UI, SQLite); replaceable **workers** (yt-dlp, ffmpeg, deno) run on any network and upload finished episodes.
 
-**Status:** server skeleton plus a mobile-first admin shell behind a login with podcast and settings management, public feeds and files compatible with the old Podcaster, an import assistant, and hit statistics with a dashboard. No workers or downloads yet.
+**Status:** server skeleton plus a mobile-first admin shell behind a login with podcast and settings management, public feeds and files compatible with the old Podcaster, an import assistant, and hit statistics with a dashboard, and worker registration with a first worker API. Workers connect and show as online; they do not process tasks yet.
 
 ## Layout
 
 | Path | Content |
 |---|---|
 | `scripts/` | `compare_feeds.py` |
+| `shared/` | `pn_shared`: worker API schemas (Pydantic) and logging, used by server and worker |
+| `worker/` | `pn_worker`: the worker (hello, ping, backoff) and its Dockerfile |
 | `server/` | Python package `app` (FastAPI), `migrations/`, tests, Dockerfile |
-| `worker/`, `shared/` | placeholders |
 | `compose.yml` | server service, data bind mount `./data` |
 | `.env.example` | supported environment variables |
 
@@ -52,6 +53,37 @@ Same URLs as the old Podcaster, no login:
 - `GET /files/<podcast-id>/<file>` – `.m4a` (`audio/x-m4a`), `.jpg/.jpeg/.png/.webp` and `.chapters.json` (`application/json+chapters`) with range requests and conditional requests. Anything else, hidden names, symlinks and path tricks return 404.
 
 Files live in `data/media/<podcast-id>/`, file names as in the old project. Feed items use the file URL as GUID, a square image per episode and a `podcast:chapters` link when a chapters file exists.
+
+## Workers
+
+A worker is a separate process (later with yt-dlp, ffmpeg and deno) that can run on any network and only needs outbound HTTPS to the server.
+
+1. In the admin UI open **Workers → New worker** (name, tier, optional pacing limits). The token (`pnw_…`, 32 random bytes) is shown **once**, in the response to the creation; the server stores only its SHA-256 hash. *Regenerate token* invalidates the old one at once; *Delete* revokes it.
+2. Start the worker with the token:
+
+   ```bash
+   # on any machine with Docker; build the image from this repository once
+   docker build -f worker/Dockerfile -t podcaster-ng-worker .
+   docker run -d --restart unless-stopped \
+     -e SERVER_URL=https://podcaster.example.org -e WORKER_TOKEN=pnw_… podcaster-ng-worker
+   ```
+
+   Or on the same host as the server: put `WORKER_TOKEN` into `.env` and run `docker compose --profile worker up -d worker` (it reaches the server at `http://server:8080` over the internal network).
+
+The worker calls `/hello` on start and `/ping` every 30 s, has a timeout on every request, backs off (2 s → 60 s, with jitter) while the server is unreachable and says hello again when it is back. A rejected token is retried every 60 s, so it can be fixed in the UI. Its container health check watches a heartbeat file, not the server.
+
+Status: *online* if the worker was seen within the last 120 s (Settings → Workers), otherwise *offline*; *never connected* before the first call; *inactive* when deactivated. The dashboard lists the workers too.
+
+### Worker API v1
+
+Header `Authorization: Bearer <token>`, base path `/api/worker`, separate from the public and admin routes. Schemas: `shared/pn_shared/api.py`.
+
+| Call | Purpose |
+|---|---|
+| `POST /hello` | worker reports its version, yt-dlp/ffmpeg/deno versions and capabilities; the reply has server time, API version, the worker's effective pacing limits, lease duration and ping interval |
+| `GET /ping` | authenticated liveness call |
+
+`401` for a missing, unknown or revoked token, `403` for a deactivated worker, `429` when rate limited: invalid tokens are limited per client address (10 failures in 5 minutes lock that address out for 5 minutes, but never a valid token), valid workers to 120 calls per minute. Every authenticated call updates *last seen*. Tokens are never logged or stored in clear text.
 
 ## Statistics and dashboard
 
@@ -99,9 +131,10 @@ Numbered files `server/migrations/NNNN_name.sql` are applied at startup, in orde
 
 ## Tests
 
-The tests need `fastapi`, `pytest` and `httpx2` (see `server/requirements-dev.txt`). Without a local virtualenv, run them in a throwaway container:
+The tests (server, shared code and worker) need the packages listed in `server/requirements-dev.txt`. Without a local virtualenv, run them in a throwaway container:
 
 ```bash
-docker run --rm -v "$PWD/server:/src/server:ro" -v "$PWD/scripts:/src/scripts:ro" python:3.12-slim sh -c \
+docker run --rm -v "$PWD/server:/src/server:ro" -v "$PWD/scripts:/src/scripts:ro" \
+  -v "$PWD/shared:/src/shared:ro" -v "$PWD/worker:/src/worker:ro" python:3.12-slim sh -c \
   'cp -r /src /tmp/s && cd /tmp/s/server && pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
 ```

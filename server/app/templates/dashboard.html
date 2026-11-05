@@ -87,9 +87,19 @@
     {% else %}<p class="muted">No podcasts yet.</p>{% endif %}
   </section>
 
-  <section class="card" aria-label="Workers, queue and errors">
-    <h2>Workers, queue and errors</h2>
-    <p class="muted">No data yet. Worker status, open tasks and the error rate appear here once workers are connected.</p>
+  <section class="card" aria-labelledby="wk-h">
+    <h2 id="wk-h">Workers</h2>
+    {% if workers %}
+      <p class="small"><strong>{{ workers_online }}</strong> of {{ workers | length }} online</p>
+      <ul class="plain">
+      {% for w in workers %}
+        <li><a href="/workers/{{ w.row.id }}">{{ w.row.name }}</a>
+          <span class="badge {{ 'on' if w.status == 'online' else 'off' }}">{{ {'online': '● online', 'offline': 'offline', 'never': 'never connected', 'inactive': 'inactive'}[w.status] }}</span>
+          <span class="muted small">tier {{ w.row.tier }} · seen {{ w.seen | ago }}</span></li>
+      {% endfor %}
+      </ul>
+    {% else %}<p class="muted">No workers yet. <a href="/workers/new">Create one</a>.</p>{% endif %}
+    <p class="muted small">Queue and error rate appear here once tasks exist.</p>
   </section>
 
   <details class="card table-view">

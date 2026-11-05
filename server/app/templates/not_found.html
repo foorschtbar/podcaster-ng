@@ -3,5 +3,5 @@
 {% block content %}
   <h1>Not found</h1>
   <p class="muted">This item does not exist (any more).</p>
-  <p><a class="btn secondary" href="/podcasts">Back to podcasts</a></p>
+  <p><a class="btn secondary" href="{{ back or '/podcasts' }}">{{ back_label or 'Back to podcasts' }}</a></p>
 {% endblock %}

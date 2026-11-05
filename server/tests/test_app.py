@@ -49,7 +49,7 @@ def test_server_exits_with_readable_error_on_newer_database(tmp_path):
     conn.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (99, 'x')")
     conn.close()
     r = subprocess.run(
-        [sys.executable, "-m", "app"], cwd=SERVER_DIR, env={"DATA_DIR": str(tmp_path), "PATH": ""},
+        [sys.executable, "-m", "app"], cwd=SERVER_DIR, env={"DATA_DIR": str(tmp_path), "PATH": "", "PYTHONPATH": str(SERVER_DIR.parent / "shared")},
         capture_output=True, text=True, timeout=30,
     )
     assert r.returncode == 1

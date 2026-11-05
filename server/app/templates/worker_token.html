@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Worker token – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>{{ 'Worker created' if created else 'New token' }}</h1>
+  <div class="card">
+    <p><strong>{{ worker.name }}</strong> – copy the token now. <strong>It is shown only once</strong> and cannot be retrieved later; the server keeps only a hash.</p>
+    <label>Token
+      <input class="token" value="{{ token }}" readonly autocomplete="off" aria-label="Worker token">
+    </label>
+    {% if not created %}<p class="small muted">The previous token no longer works.</p>{% endif %}
+    <h2>Run the worker</h2>
+    <p class="small muted">On any machine with Docker (build the image from this repository once):</p>
+<pre class="cmd">docker run -d --restart unless-stopped \
+  -e SERVER_URL={{ server_url }} \
+  -e WORKER_TOKEN={{ token }} \
+  podcaster-ng-worker</pre>
+    <p class="small muted">With the Compose file of this project (worker on the same host as the server), put <code>WORKER_TOKEN</code> into <code>.env</code> and start it with <code>docker compose --profile worker up -d</code>.</p>
+  </div>
+  <p><a class="btn" href="/workers">Done</a></p>
+{% endblock %}

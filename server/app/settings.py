@@ -43,6 +43,8 @@ FIELDS = (
     Field("escalation_deadline_min", "Escalation deadline", "int", "Queue", 10, 1, 1440, unit="minutes",
           hint="An unclaimed task becomes visible to the next tier after this time."),
     Field("failure_threshold", "Failed attempts before pausing a task (N)", "int", "Queue", 4, 1, 100),
+    Field("worker_online_seconds", "Worker counts as online if seen within", "int", "Workers", 120, 30, 3600,
+          unit="seconds"),
     Field("stats_retention_days", "Keep daily hit counters for", "int", "Statistics", 730, 30, 3650, unit="days",
           hint="Older counters are deleted every night."),
     Field("telegram_token", "Telegram bot token", "secret", "Telegram", ""),

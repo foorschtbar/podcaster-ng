@@ -30,6 +30,8 @@ class SecurityHeaders:
             if message["type"] == "http.response.start":
                 present = {k.lower() for k, _ in message["headers"]}
                 extra = {"X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin"}
+                if scope["path"].startswith("/api/"):
+                    extra["Cache-Control"] = "no-store"
                 if scope.get("state", {}).get("admin"):
                     extra.update(ADMIN_HEADERS)
                 message["headers"] = [*message["headers"], *(

@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .auth import LoginLimiter, load_session_secret
+from .auth import LoginLimiter, RateLimiter, load_session_secret
 from .config import Config
 from .importer import ImportJob
 from .db import connect
@@ -20,6 +20,7 @@ from .migrations import migrate
 from .public import router as public_router
 from .routes import router as admin_router
 from .stats import prune_loop
+from .worker_api import router as worker_router
 from .web import CsrfError, LoginRequired, NotConfigured, locked_response
 
 log = logging.getLogger(__name__)
@@ -48,6 +49,9 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
     app.state.config = config
     app.state.limiter = limiter or LoginLimiter()
     app.state.import_job = ImportJob()
+    # Invalid worker tokens: per client address. Valid workers: per worker.
+    app.state.worker_auth_limiter = LoginLimiter(max_failures=10, window=300, lockout=300, delay=0)
+    app.state.worker_rate_limiter = RateLimiter(limit=120, window=60)
 
     @app.exception_handler(NotConfigured)
     def not_configured(request: Request, exc: NotConfigured):
@@ -78,6 +82,7 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
 
     app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
     app.include_router(public_router)
+    app.include_router(worker_router)
     app.include_router(admin_router)
     # Outermost last: the hit counter sees every request, the security headers every response.
     app.add_middleware(HitCounter, db_path=config.db_path)

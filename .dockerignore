@@ -1,0 +1,11 @@
+# Allow-list: nothing reaches the Docker daemon unless it is listed here
+# (this keeps .env, data/ and docs/ out of every build context).
+*
+!server/requirements.txt
+!server/app
+!server/migrations
+!shared/pn_shared
+!worker/requirements.txt
+!worker/pn_worker
+**/__pycache__
+**/*.pyc

@@ -1,3 +1,4 @@
+# Build from the repository root (see compose.yml): docker build -f server/Dockerfile .
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -7,11 +8,12 @@ ENV PYTHONUNBUFFERED=1 \
     FORWARDED_ALLOW_IPS="*"
 
 WORKDIR /srv
-COPY requirements.txt .
+COPY server/requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY app ./app
-COPY migrations ./migrations
+COPY shared/pn_shared ./pn_shared
+COPY server/app ./app
+COPY server/migrations ./migrations
 
 ARG UID=1000
 ARG GID=1000

@@ -5,8 +5,9 @@ from datetime import timedelta
 from fastapi import Depends, Request
 from fastapi.responses import HTMLResponse
 
-from . import charts, stats
-from .web import Session, db, protected, render, require_session, templates
+from . import charts, settings, stats
+from .workers_ui import worker_cards
+from .web import Session, db, env_defaults, protected, render, require_session, templates
 
 DAYS = 30
 
@@ -14,7 +15,7 @@ templates.env.globals["rank_bar"] = charts.rank_bar
 templates.env.globals["meter"] = charts.meter
 
 
-def dashboard_context(conn, data_dir) -> dict:
+def dashboard_context(conn, data_dir, env_defaults: dict | None = None) -> dict:
     """Everything the dashboard shows. Cards of later steps (workers, queue, errors) are added here."""
     today = stats.today()
     series = stats.daily_series(conn, DAYS, today)
@@ -23,6 +24,7 @@ def dashboard_context(conn, data_dir) -> dict:
     files = [row["file"] for row in series]
     peak = max(series, key=lambda r: r["file"])
     storage = stats.storage_overview(conn, data_dir)
+    worker_list = worker_cards(conn, settings.get_all(conn, env_defaults))
     top = stats.top_episodes(conn, DAYS, 10, today)
     return {
         "days": DAYS,
@@ -35,6 +37,8 @@ def dashboard_context(conn, data_dir) -> dict:
         "top_max": top[0]["count"] if top else 1,
         "apps_files": _shares(stats.app_shares(conn, "file", DAYS, today)),
         "apps_feeds": _shares(stats.app_shares(conn, "feed", DAYS, today)),
+        "workers": worker_list,
+        "workers_online": sum(1 for w in worker_list if w["status"] == "online"),
         "storage": storage,
         "storage_max": max([p["size"] for p in storage["podcasts"]], default=0) or 1,
         "disk_used_fraction": (storage["disk"]["used"] / storage["disk"]["total"]) if storage["disk"] else 0,
@@ -50,5 +54,5 @@ def _shares(rows: list[tuple[str, int]]) -> dict:
 @protected.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
 def dashboard(request: Request, session: Session = Depends(require_session)):
     with db(request) as conn:
-        ctx = dashboard_context(conn, request.app.state.config.data_dir)
+        ctx = dashboard_context(conn, request.app.state.config.data_dir, env_defaults(request))
     return render(request, "dashboard.html", session, active="dashboard", title="Dashboard", **ctx)

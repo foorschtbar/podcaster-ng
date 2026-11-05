@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Confirm – PodcasterNG{% endblock %}
+{% block content %}
+  <div class="card">
+  {% if action == 'delete' %}
+    <h1>Delete worker?</h1>
+    <p><strong>{{ worker.name }}</strong> will be removed and its token stops working immediately.</p>
+    <form method="post" action="/workers/{{ worker.id }}/delete" class="actions">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+      <button type="submit" class="danger">Delete worker</button>
+      <a class="btn secondary" href="/workers/{{ worker.id }}">Cancel</a>
+    </form>
+  {% else %}
+    <h1>Regenerate token?</h1>
+    <p>A new token is created for <strong>{{ worker.name }}</strong>. The old token stops working immediately, so the worker has to be restarted with the new one.</p>
+    <form method="post" action="/workers/{{ worker.id }}/regenerate" class="actions">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+      <button type="submit" class="danger">Regenerate token</button>
+      <a class="btn secondary" href="/workers/{{ worker.id }}">Cancel</a>
+    </form>
+  {% endif %}
+  </div>
+{% endblock %}

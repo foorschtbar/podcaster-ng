@@ -34,3 +34,11 @@ def do_login(client, password=PASSWORD, user=USER):
 
 def csrf_of(client):
     return re.search(r'name="csrf-token" content="([^"]+)"', client.get("/dashboard").text).group(1)
+
+
+def settings_form(**over):
+    """A complete, valid settings form (all defaults), so tests do not break when a setting is added."""
+    from app import settings
+    form = {f.key: ("" if f.default is None else str(f.default)) for f in settings.FIELDS if f.kind != "secret"}
+    form.update(over)
+    return form

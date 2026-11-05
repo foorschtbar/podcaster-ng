@@ -148,3 +148,8 @@ th, td { text-align: right; padding: .3rem .5rem; border-bottom: 1px solid var(-
 th[scope="col"]:first-child, th[scope="row"] { text-align: left; font-weight: normal; }
 thead th { position: sticky; top: 0; background: var(--card); }
 @media (forced-colors: active) { .col-chart .bar, .rank-bar .fill { fill: CanvasText; } }
+
+ul.plain { list-style: none; margin: 0; padding: 0; }
+ul.plain li { margin-bottom: .4rem; }
+input.token { user-select: all; font-family: ui-monospace, monospace; font-size: .85rem; }
+pre.cmd { background: var(--bg); border: 1px solid var(--line); border-radius: .4rem; padding: .75rem; overflow-x: auto; font-size: .8rem; white-space: pre; }

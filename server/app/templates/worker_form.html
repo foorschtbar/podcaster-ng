@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_forms.html" import field %}
+{% block title %}{{ title }} – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>{{ title }}</h1>
+  {% if errors %}<p class="error" role="alert">Please fix the marked fields. Nothing was saved.</p>{% endif %}
+  <form method="post" action="{{ '/workers' if creating else '/workers/' ~ worker.id }}" class="card">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+    {{ field('name', 'Name', v.name, errors.name, 'Shown in the UI and in logs, e.g. “local” or “home-pc”.', required=True) }}
+    {{ field('tier', 'Tier', v.tier, errors.tier, '1 is tried first; a task moves to the next tier when this one fails or is unavailable.', required=True, numeric=True) }}
+    <label class="check"><input type="checkbox" name="active" value="1"{% if v.active %} checked{% endif %}> Active</label>
+
+    <h2>Pacing limits</h2>
+    <p class="muted small">Empty fields use the defaults from Settings. Later, a worker's value caps the value of a podcast.</p>
+    {{ field('pause_min_s', 'Pause between videos, min (seconds)', v.pause_min_s, errors.pause_min_s, 'Default: ' ~ defaults.pause_min_s, numeric=True) }}
+    {{ field('pause_max_s', 'Pause between videos, max (seconds)', v.pause_max_s, errors.pause_max_s, 'Default: ' ~ defaults.pause_max_s, numeric=True) }}
+    {{ field('downloads_per_hour', 'Downloads per hour', v.downloads_per_hour, errors.downloads_per_hour, 'Default: ' ~ defaults.downloads_per_hour, numeric=True) }}
+
+    <button type="submit">{{ 'Create worker' if creating else 'Save' }}</button>
+  </form>
+  <p class="actions">
+    <a class="btn secondary" href="/workers">Cancel</a>
+    {% if not creating %}
+      <a class="btn secondary" href="/workers/{{ worker.id }}/regenerate">Regenerate token…</a>
+      <a class="btn danger" href="/workers/{{ worker.id }}/delete">Delete…</a>
+    {% endif %}
+  </p>
+{% endblock %}

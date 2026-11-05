@@ -122,3 +122,23 @@ class LoginLimiter:
         self._failures = {c: [t for t in ts if now - t < self.window] for c, ts in self._failures.items()}
         self._failures = {c: ts for c, ts in self._failures.items() if ts}
         self._locked_until = {c: u for c, u in self._locked_until.items() if u > now}
+
+
+class RateLimiter:
+    """Sliding-window request limiter per key (in memory)."""
+
+    def __init__(self, limit: int, window: float = 60.0, clock: Callable[[], float] = time.monotonic):
+        self.limit = limit
+        self.window = window
+        self._clock = clock
+        self._hits: dict[object, list[float]] = {}
+
+    def allow(self, key: object) -> bool:
+        now = self._clock()
+        recent = [t for t in self._hits.get(key, []) if now - t < self.window]
+        if len(recent) >= self.limit:
+            self._hits[key] = recent
+            return False
+        recent.append(now)
+        self._hits[key] = recent
+        return True

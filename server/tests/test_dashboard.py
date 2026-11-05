@@ -86,7 +86,7 @@ def test_empty_database_renders(c):
     r = c.get("/dashboard")
     assert r.status_code == 200
     for text in ("Downloads per day", "Feed requests per day", "Top episodes", "No downloads in the last 30 days",
-                 "Disk space", "No podcasts yet", "No data yet. Worker status", "Table view"):
+                 "Disk space", "No podcasts yet", "No workers yet", "Table view"):
         assert text in r.text, text
     assert "col-chart" in r.text and "/static/dashboard.js" in r.text
 
