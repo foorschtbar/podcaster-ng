@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – PodcasterNG{% endblock %}
+{% block head %}<script src="/static/dashboard.js" defer></script>{% endblock %}
+{% block content %}
+  <h1>Dashboard</h1>
+
+  <section aria-label="Key figures" class="tiles">
+    <div class="tile"><div class="tile-label">Downloads, last {{ days }} days</div><div class="tile-value">{{ '{:,}'.format(totals.file) }}</div></div>
+    <div class="tile"><div class="tile-label">Feed requests, last {{ days }} days</div><div class="tile-value">{{ '{:,}'.format(totals.feed) }}</div></div>
+    <div class="tile"><div class="tile-label">Transferred, last {{ days }} days</div><div class="tile-value">{{ totals.bytes | human_size }}</div></div>
+    <div class="tile"><div class="tile-label">Episodes</div><div class="tile-value">{{ '{:,}'.format(storage.total_episodes) }}</div>
+      <div class="tile-note">{{ storage.total_size | human_size }} of audio</div></div>
+  </section>
+
+  <section class="card" aria-labelledby="disk-h">
+    <h2 id="disk-h">Disk space</h2>
+    {% if storage.disk %}
+      {{ meter(disk_used_fraction) }}
+      <p class="small">
+        <strong>{{ storage.disk.free | human_size }}</strong> free of {{ storage.disk.total | human_size }}
+        ({{ (disk_used_fraction * 100) | round | int }}% used)
+        {% if disk_used_fraction >= 0.95 %}<span class="status critical">✖ Critically low</span>
+        {% elif disk_used_fraction >= 0.85 %}<span class="status warn">⚠ Running low</span>{% endif %}
+      </p>
+    {% else %}
+      <p class="muted">Disk usage is not available.</p>
+    {% endif %}
+  </section>
+
+  <div class="grid2">
+    <section class="card chart" aria-labelledby="dl-h">
+      <h2 id="dl-h">Downloads per day</h2>
+      <p class="small muted">Last {{ days }} days{% if peak %} · peak {{ '{:,}'.format(peak.file) }} on {{ peak.day.strftime('%-d %b') }}{% endif %}</p>
+      <div class="plot">{{ files_chart }}<div class="tip" role="status" hidden></div></div>
+    </section>
+    <section class="card chart" aria-labelledby="fd-h">
+      <h2 id="fd-h">Feed requests per day</h2>
+      <p class="small muted">Last {{ days }} days</p>
+      <div class="plot">{{ feeds_chart }}<div class="tip" role="status" hidden></div></div>
+    </section>
+  </div>
+  <p class="small muted">Days are UTC. A download is counted once per file request (a range request starting at the beginning counts, later ranges only add their bytes). Artwork and chapter files are not counted.</p>
+
+  <section class="card" aria-labelledby="top-h">
+    <h2 id="top-h">Top episodes</h2>
+    {% if top_episodes %}
+      <ol class="rank">
+      {% for e in top_episodes %}
+        <li>
+          <div class="rank-head"><span class="rank-name">{{ e.title }} <span class="muted small">{{ e.podcast_name }}</span></span><span class="rank-val">{{ '{:,}'.format(e.count) }}</span></div>
+          {{ rank_bar(e.count / top_max) }}
+        </li>
+      {% endfor %}
+      </ol>
+    {% else %}<p class="muted">No downloads in the last {{ days }} days.</p>{% endif %}
+  </section>
+
+  <div class="grid2">
+    {% for title, data in (('Downloads by app', apps_files), ('Feed requests by app', apps_feeds)) %}
+    <section class="card">
+      <h2>{{ title }}</h2>
+      {% if data.rows %}
+        <ol class="rank">
+        {% for group, n, share in data.rows %}
+          <li>
+            <div class="rank-head"><span class="rank-name">{{ group }}</span><span class="rank-val">{{ (share * 100) | round | int }}% <span class="muted small">({{ '{:,}'.format(n) }})</span></span></div>
+            {{ rank_bar(n / data.max) }}
+          </li>
+        {% endfor %}
+        </ol>
+      {% else %}<p class="muted">No data yet.</p>{% endif %}
+    </section>
+    {% endfor %}
+  </div>
+
+  <section class="card" aria-labelledby="stor-h">
+    <h2 id="stor-h">Storage per podcast</h2>
+    {% if storage.podcasts %}
+      <ol class="rank">
+      {% for p in storage.podcasts %}
+        <li>
+          <div class="rank-head"><span class="rank-name">{{ p.name }} <span class="muted small">{{ p.episodes }} episodes</span></span><span class="rank-val">{{ p.size | human_size }}</span></div>
+          {{ rank_bar(p.size / storage_max) }}
+        </li>
+      {% endfor %}
+      </ol>
+    {% else %}<p class="muted">No podcasts yet.</p>{% endif %}
+  </section>
+
+  <section class="card" aria-label="Workers, queue and errors">
+    <h2>Workers, queue and errors</h2>
+    <p class="muted">No data yet. Worker status, open tasks and the error rate appear here once workers are connected.</p>
+  </section>
+
+  <details class="card table-view">
+    <summary>Table view: daily figures</summary>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th scope="col">Day</th><th scope="col">Downloads</th><th scope="col">Feed requests</th><th scope="col">Transferred</th></tr></thead>
+      <tbody>
+      {% for r in series | reverse %}
+        <tr><th scope="row">{{ r.day.isoformat() }}</th><td>{{ '{:,}'.format(r.file) }}</td><td>{{ '{:,}'.format(r.feed) }}</td><td>{{ r.bytes | human_size }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+{% endblock %}

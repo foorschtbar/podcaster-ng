@@ -19,7 +19,7 @@ def valid_form(**over):
     form = {f.key: "" for f in settings.FIELDS if f.kind != "secret"}
     form.update({"scan_interval_min": "30", "pause_min_s": "2", "pause_max_s": "9", "downloads_per_hour": "5",
                  "upload_limit_mb": "512", "lease_seconds": "120", "escalation_deadline_min": "15",
-                 "failure_threshold": "3"})
+                 "failure_threshold": "3", "stats_retention_days": "365"})
     form.update(over)
     return form
 

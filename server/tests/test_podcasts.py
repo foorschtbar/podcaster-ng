@@ -193,7 +193,8 @@ def test_settings_defaults_shown_and_inherited(c):
     post(c, "/settings", **{**{f.key: "" for f in settings.FIELDS if f.kind != "secret"},
                             "scan_interval_min": "15", "pause_min_s": "5", "pause_max_s": "20",
                             "downloads_per_hour": "3", "upload_limit_mb": "1024", "lease_seconds": "300",
-                            "escalation_deadline_min": "10", "failure_threshold": "4"})
+                            "escalation_deadline_min": "10", "failure_threshold": "4",
+                            "stats_retention_days": "730"})
     post(c, "/podcasts", **valid())
     assert "scan every 15 min" in c.get("/podcasts").text  # empty interval follows the setting
 

@@ -2,7 +2,7 @@
 
 Turns YouTube playlists into podcast feeds. The **server** coordinates and serves (feeds, files, queue, admin UI, SQLite); replaceable **workers** (yt-dlp, ffmpeg, deno) run on any network and upload finished episodes.
 
-**Status:** server skeleton plus a mobile-first admin shell behind a login with podcast and settings management, public feeds and files compatible with the old Podcaster, and an import assistant. No workers or downloads yet.
+**Status:** server skeleton plus a mobile-first admin shell behind a login with podcast and settings management, public feeds and files compatible with the old Podcaster, an import assistant, and hit statistics with a dashboard. No workers or downloads yet.
 
 ## Layout
 
@@ -52,6 +52,21 @@ Same URLs as the old Podcaster, no login:
 - `GET /files/<podcast-id>/<file>` – `.m4a` (`audio/x-m4a`), `.jpg/.jpeg/.png/.webp` and `.chapters.json` (`application/json+chapters`) with range requests and conditional requests. Anything else, hidden names, symlinks and path tricks return 404.
 
 Files live in `data/media/<podcast-id>/`, file names as in the old project. Feed items use the file URL as GUID, a square image per episode and a `podcast:chapters` link when a chapters file exists.
+
+## Statistics and dashboard
+
+Anonymous daily counters in `hits_daily` (day, podcast, episode, kind, app group, count, bytes). No IP addresses and no raw user agents are stored; the user agent is only mapped to an app group (table `RULES` in `server/app/app_groups.py`: Apple Podcasts, Overcast, Pocket Casts, Spotify, …, Bots, Browsers, Other).
+
+Counting rules (days are UTC):
+
+- only the public routes are counted, and only successful `GET` responses; admin, `/healthz`, static files, `HEAD`, `304` and errors are not;
+- `feed`: every feed request; `file`: audio (`.m4a`) downloads only, not artwork or chapter files;
+- a download is counted once: a request without `Range`, or one whose first range starts at byte 0. Further ranges of the same download add their bytes but no count. Apps that probe with several `bytes=0-` requests can still count more than once;
+- bytes are the size of each response.
+
+Old counters are deleted at start and every night at 03:30 UTC; the retention (default 730 days) is set under Settings → Statistics.
+
+The dashboard (`/dashboard`) shows downloads, feed requests and transferred data for 30 days (SVG charts rendered on the server, hover/keyboard tooltips, a table view below), top episodes, shares per app, disk space and storage per podcast. The workers/queue/error card is a placeholder until those exist.
 
 ## Import from the old Podcaster
 

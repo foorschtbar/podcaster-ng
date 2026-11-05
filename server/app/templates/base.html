@@ -10,6 +10,7 @@
   <title>{% block title %}PodcasterNG{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js" defer></script>
+  {% block head %}{% endblock %}
 </head>
 <body{% if session %} hx-headers='{"X-CSRF-Token": "{{ session.csrf }}"}'{% endif %}>
 {% if session %}

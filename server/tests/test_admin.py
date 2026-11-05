@@ -162,7 +162,8 @@ def test_login_delay_applied(tmp_path, monkeypatch):
     async def fake_sleep(s):
         slept.append(s)
 
-    monkeypatch.setattr("app.admin.asyncio.sleep", fake_sleep)
+    import types
+    monkeypatch.setattr("app.admin.asyncio", types.SimpleNamespace(sleep=fake_sleep))  # only the login delay
     limiter = auth.LoginLimiter(delay=1.5)
     with TestClient(create_app(make_config(tmp_path), limiter), base_url="https://testserver",
                     follow_redirects=False) as c:

@@ -13,7 +13,7 @@ from .web import (COOKIE, PAGES, CsrfError, LoginRequired, Session, client_of, p
 log = logging.getLogger(__name__)
 
 # Pages that have a real implementation in their own module.
-IMPLEMENTED = {"podcasts", "settings"}
+IMPLEMENTED = {"dashboard", "podcasts", "settings"}
 
 
 def _login_page(request: Request, status_code: int = 200, error: str | None = None):

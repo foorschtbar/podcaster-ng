@@ -1,5 +1,7 @@
 """FastAPI application."""
 
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,18 +15,14 @@ from .auth import LoginLimiter, load_session_secret
 from .config import Config
 from .importer import ImportJob
 from .db import connect
+from .middleware import HitCounter, SecurityHeaders
 from .migrations import migrate
 from .public import router as public_router
 from .routes import router as admin_router
+from .stats import prune_loop
 from .web import CsrfError, LoginRequired, NotConfigured, locked_response
 
 log = logging.getLogger(__name__)
-
-ADMIN_HEADERS = {
-    "Cache-Control": "no-store",
-    "X-Frame-Options": "DENY",
-    "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'; form-action 'self'",
-}
 
 
 def create_app(config: Config | None = None, limiter: LoginLimiter | None = None) -> FastAPI:
@@ -37,23 +35,19 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
         if not config.admin_configured:
             log.warning("ADMIN_USER/ADMIN_PASSWORD not set: admin UI is locked")
         log.info("PodcasterNG server %s started", __version__)
-        yield
+        prune_task = asyncio.create_task(prune_loop(config.db_path))
+        try:
+            yield
+        finally:
+            prune_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await prune_task
 
     app = FastAPI(title="PodcasterNG", version=__version__, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.config = config
     app.state.limiter = limiter or LoginLimiter()
     app.state.import_job = ImportJob()
-
-    @app.middleware("http")
-    async def security_headers(request: Request, call_next):
-        response = await call_next(request)
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("Referrer-Policy", "same-origin")
-        if getattr(request.state, "admin", False):
-            for key, value in ADMIN_HEADERS.items():
-                response.headers.setdefault(key, value)
-        return response
 
     @app.exception_handler(NotConfigured)
     def not_configured(request: Request, exc: NotConfigured):
@@ -85,4 +79,7 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
     app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
     app.include_router(public_router)
     app.include_router(admin_router)
+    # Outermost last: the hit counter sees every request, the security headers every response.
+    app.add_middleware(HitCounter, db_path=config.db_path)
+    app.add_middleware(SecurityHeaders)
     return app

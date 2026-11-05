@@ -2,7 +2,7 @@
 
 from fastapi import Depends
 
-from . import admin, import_ui, podcasts_ui, settings_ui  # noqa: F401
+from . import admin, dashboard_ui, import_ui, podcasts_ui, settings_ui  # noqa: F401
 from .web import check_configured, protected, router
 
 router.include_router(protected, dependencies=[Depends(check_configured)])
