@@ -199,3 +199,20 @@ def test_requires_login_and_csrf(tmp_path):
 def test_token_page_has_no_inline_script(c):
     html = create(c).text
     assert "onfocus" not in html and not re.search(r"<script(?![^>]*\ssrc=)", html)
+
+
+def test_token_page_offers_copy_buttons_and_selectable_fields(c):
+    html = create(c).text
+    token = token_of_html(html)
+    assert 'data-copy="worker-token"' in html and 'data-copy="run-command"' in html
+    assert 'id="worker-token"' in html and 'data-select-all' in html and 'id="run-command"' in html
+    assert f"WORKER_TOKEN={token}" in html                               # the command to copy contains the real token
+    assert '<script src="/static/copy.js"' in html
+    js = c.get("/static/copy.js").text
+    assert "navigator.clipboard" in js and "execCommand" in js and "innerHTML" not in js    # clipboard API with a legacy fallback
+    css = c.get("/static/style.css").text
+    assert "-webkit-user-select: all" in css                             # Safari needs the prefixed property
+
+
+def token_of_html(html):
+    return re.search(r'class="token" value="([^"]+)"', html).group(1)
