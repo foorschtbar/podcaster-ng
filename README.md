@@ -188,7 +188,8 @@ python3 scripts/compare_feeds.py https://old.example.org https://new.example.org
 
 ## Admin UI
 
-Served at `/`: `/login`, then Dashboard, Podcasts, Episodes, Workers, Tasks and Settings (plus Retention under Episodes).
+Served at `/`: `/login`, then Dashboard, Podcasts, Episodes, Workers, Tasks and Settings (plus Retention under Episodes) and Events.
+- **Events:** one list, newest first, of what happened: every task attempt with the worker that handled it and its result, escalations and pauses, deleted files and Telegram messages. Filter by kind and podcast. It reads the tables that already record these things (tasks and attempts, task events, the retention log, the message outbox), so there is no separate log to keep. Technical details (startup, scheduler, backups, HTTP access) are in the container log, `docker compose logs server`. Admin actions such as settings changes are not recorded.
 
 - Session: signed cookie (HttpOnly, Secure, SameSite=Lax, 12 h). The `Secure` flag means the UI must be reached over HTTPS, i.e. through the reverse proxy. Logout removes the cookie; sessions are stateless, so changing `SESSION_SECRET` (or deleting `session_secret` from `settings`) invalidates all of them.
 - Failed logins: 1 s delay each, 5 failures within 15 min lock the client address out for 15 min (in memory, reset on restart).

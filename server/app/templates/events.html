@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Events – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>Events</h1>
+  <p class="muted small">Task results with the worker that handled them, escalations and pauses, deleted files and Telegram messages, newest first. Times are UTC.</p>
+  <form method="get" action="/events" class="card filters">
+    <label>Kind
+      <select name="kind"><option value="">All</option>{% for k, label in labels.items() %}<option value="{{ k }}"{% if k == kind %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    </label>
+    <label>Podcast
+      <select name="podcast"><option value="">All</option>{% for p in all_podcasts %}<option value="{{ p.id }}"{% if p.id == podcast %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+    </label>
+    <button type="submit">Filter</button>
+  </form>
+  {% if not rows %}<p class="muted">No events{% if kind or podcast %} match the filter{% endif %}.</p>{% endif %}
+  {% for e in rows %}
+  <article class="card item">
+    <div class="item-head">
+      <strong>{% if e.link %}<a href="{{ e.link }}">{{ e.subject }}</a>{% else %}{{ e.subject }}{% endif %}</strong>
+      <span class="badge {{ 'on' if e.level == 'ok' else ('warn' if e.level in ('warn', 'bad') else 'off') }}">{{ e.what }}</span>
+    </div>
+    <div class="muted small">{{ e.at }}{% if e.podcast_name %} · {{ e.podcast_name }}{% endif %}{% if e.detail %} · {{ e.detail }}{% endif %}</div>
+  </article>
+  {% endfor %}
+  {% if page_count > 1 %}
+  <p class="actions">
+    {% if page > 1 %}<a class="btn secondary" href="/events?{{ query }}{{ '&' if query }}page={{ page - 1 }}">← Newer</a>{% endif %}
+    <span class="muted small">Page {{ page }} of {{ page_count }} ({{ total }} events)</span>
+    {% if page < page_count %}<a class="btn secondary" href="/events?{{ query }}{{ '&' if query }}page={{ page + 1 }}">Older →</a>{% endif %}
+  </p>
+  {% endif %}
+{% endblock %}
