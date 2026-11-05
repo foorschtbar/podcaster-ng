@@ -104,7 +104,7 @@ def test_full_package_becomes_an_episode_in_the_feed(client):
     assert item.findtext("itunes:duration", namespaces=ns) == "3600"
     # the published files are served, with range support
     audio = client.get(enc.get("url").replace("https://pod.example.org", ""))
-    assert audio.content == M4A and audio.headers["content-type"] == "audio/x-m4a"
+    assert audio.content == M4A and audio.headers["content-type"] == "audio/mp4"
     assert client.get(enc.get("url").replace("https://pod.example.org", ""), headers={"Range": "bytes=0-9"}).status_code == 206
 
 

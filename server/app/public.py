@@ -13,7 +13,7 @@ from .db import connect
 router = APIRouter()
 
 # Only these file types are served; the content type is derived from the name.
-MEDIA_TYPES = {".m4a": "audio/x-m4a", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+MEDIA_TYPES = {".m4a": "audio/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
                ".webp": "image/webp"}
 
 

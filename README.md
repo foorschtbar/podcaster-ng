@@ -53,7 +53,7 @@ Logs are JSON lines on stdout.
 Same URLs as the old Podcaster, no login:
 
 - `GET /<podcast-id>.xml` – RSS feed (only `available` episodes, newest first). The base URL is taken from Settings, then `BASE_URL`, then the request.
-- `GET /files/<podcast-id>/<file>` – `.m4a` (`audio/x-m4a`), `.jpg/.jpeg/.png/.webp` and `.chapters.json` (`application/json+chapters`) with range requests and conditional requests. Anything else, hidden names, symlinks and path tricks return 404.
+- `GET /files/<podcast-id>/<file>` – `.m4a` (`audio/mp4`, like the old project; the feed enclosure type stays `audio/x-m4a`), `.jpg/.jpeg/.png/.webp` and `.chapters.json` (`application/json+chapters`) with range requests and conditional requests. Anything else, hidden names, symlinks and path tricks return 404.
 
 Files live in `data/media/<podcast-id>/`, file names as in the old project. Feed items use the file URL as GUID, a square image per episode and a `podcast:chapters` link when a chapters file exists.
 

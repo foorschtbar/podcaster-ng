@@ -83,7 +83,7 @@ def test_paused_podcast_still_has_feed(client):
 def test_file_served_with_content_type_and_ranges(client):
     r = client.get("/files/abgt/Ep%201%20%23%3F.m4a")
     assert r.status_code == 200 and r.content == AUDIO
-    assert r.headers["content-type"] == "audio/x-m4a"
+    assert r.headers["content-type"] == "audio/mp4"
     assert r.headers["accept-ranges"] == "bytes"
     assert int(r.headers["content-length"]) == len(AUDIO)
     part = client.get("/files/abgt/Ep%201%20%23%3F.m4a", headers={"Range": "bytes=100-199"})
@@ -112,7 +112,7 @@ def test_head_and_conditional_requests(client):
 
 
 @pytest.mark.parametrize("name,expected", [
-    ("a.m4a", "audio/x-m4a"), ("a.M4A", "audio/x-m4a"), ("a.square.jpg", "image/jpeg"), ("a.png", "image/png"),
+    ("a.m4a", "audio/mp4"), ("a.M4A", "audio/mp4"), ("a.square.jpg", "image/jpeg"), ("a.png", "image/png"),
     ("a.webp", "image/webp"), ("a.chapters.json", "application/json+chapters"),
     ("a.info.json", None), ("archive.txt", None), ("a.html", None), ("a", None),
 ])
