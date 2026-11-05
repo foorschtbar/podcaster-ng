@@ -1,0 +1,8 @@
+# Local planning docs (concept and implementation steps) are not versioned
+/docs/
+
+# Runtime data and local files
+/data/
+.env
+__pycache__/
+.pytest_cache/
