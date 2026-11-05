@@ -116,6 +116,38 @@
     {% else %}<p class="muted small">No errors so far.</p>{% endif %}
   </section>
 
+  <div class="grid2">
+    <section class="card" aria-labelledby="rate-h">
+      <h2 id="rate-h">Download attempts per worker</h2>
+      <p class="small muted">Last 7 days. Premieres that were rescheduled are not counted.</p>
+      {% if attempt_stats.workers %}
+      <div class="table-scroll"><table>
+        <thead><tr><th scope="col">Worker</th><th scope="col">Succeeded</th><th scope="col">Failed</th><th scope="col">Success rate</th></tr></thead>
+        <tbody>{% for w in attempt_stats.workers %}
+          <tr><th scope="row">{{ w.name or 'deleted worker' }}</th><td>{{ w.ok }}</td><td>{{ w.failed }}</td><td>{{ (w.rate ~ ' %') if w.rate is not none else '–' }}</td></tr>
+        {% endfor %}</tbody>
+      </table></div>
+      {% else %}<p class="muted">No download attempts yet.</p>{% endif %}
+    </section>
+    <section class="card chart" aria-labelledby="bot-h">
+      <h2 id="bot-h"><code>bot_check</code> failures per day</h2>
+      <p class="small muted">Last 14 days · {{ attempt_stats.bot_total }} in total{% if attempt_stats.bot_peak %} · peak {{ attempt_stats.bot_peak }}{% endif %}</p>
+      <div class="plot">{{ attempt_stats.bot_chart }}<div class="tip" role="status" hidden></div></div>
+    </section>
+  </div>
+
+  <section class="card" aria-labelledby="msg-h">
+    <h2 id="msg-h">Telegram messages</h2>
+    {% if messages %}
+    <ul class="plain small">
+    {% for m in messages %}
+      <li><span class="badge {{ 'on' if m.status == 'sent' else 'off' }}">{{ m.status }}</span> {{ m.kind }} · {{ m.created_at | until }}
+        {% if m.last_error and m.status != 'sent' %}<div class="muted">{{ m.last_error }}</div>{% endif %}</li>
+    {% endfor %}
+    </ul>
+    {% else %}<p class="muted">None yet. Messages are sent when a task is paused or a worker goes offline.</p>{% endif %}
+  </section>
+
   <details class="card table-view">
     <summary>Table view: daily figures</summary>
     <div class="table-scroll">

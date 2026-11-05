@@ -113,6 +113,21 @@ pending --claim--> claimed --scan-result--> done
 
 The worker runs scans with the yt-dlp command line (metadata only, `--flat-playlist`) as a separate process with a hard time limit (`SCAN_TIMEOUT`, default 300 s), so a hung scan is killed. `YTDLP_PROXY` sets a proxy for yt-dlp only; the calls to the server never use proxy environment variables. `POLL_INTERVAL` overrides the idle wait between claims. A worker without yt-dlp only pings.
 
+## Escalation, pausing and Telegram alerts
+
+**Tiers.** Every worker has a tier (1 is tried first). A task has a current tier and is visible to workers of that tier and below. A new task starts at tier 1 and moves to the next tier that has an active worker
+
+- when a worker of the current tier reports `bot_check`, `internal` or `incomplete` for it (a different IP or machine may succeed; `network` and `timeout` are only retried with backoff, `private`, `removed` and `not_yet_available` never escalate), or
+- when no worker took it within the escalation deadline (Settings → Queue, default 10 minutes; it counts from when the task became due, so a tier-1 worker that is offline does not hold things up).
+
+A worker does not get a task back that it reported as failed within ten minutes, as long as another worker could take it. Every move is recorded in the task's *escalation history*.
+
+**Pausing.** Failed attempts since the task was last (re)opened are weighed: `bot_check`, `internal` and `incomplete` count 1, `network`, `timeout` and an expired lease count 1/4, `not_yet_available`, `private` and `removed` do not count. When the sum reaches *N* (default 4) **and** the failures come from at least two workers, the task is `paused` with a reason and one Telegram message is queued. If only one worker is active, one worker is enough (otherwise a single blocked worker would never raise the alarm). A paused task is not offered to workers. It reopens by itself after the reopen timer (default 6 hours) with a clean slate at tier 1, or at once with *Release (reopen)* or *Retry* in the UI; *Close* ends it.
+
+**Telegram.** Create a bot with @BotFather, send it a message, and enter its token and your chat id under Settings → Telegram; *Send test message* uses the saved values. Messages: a task was paused (podcast, video, failed attempts per worker, last errors, a link), a worker has been offline for more than 15 minutes (default) and when it is back, and optionally every new episode. Messages go through an outbox in the database: each condition has a unique key, so it produces at most one message however often the scheduler looks; a failed delivery is retried with backoff (up to 8 times); without a configured bot token and chat id messages are marked *skipped*. The bot token is part of every Telegram request URL, so HTTP request logging is switched off for it and error texts are scrubbed. After a server start the watchdog waits three minutes so that the workers can reconnect first.
+
+The dashboard shows the queue, each worker's success rate over the last week, `bot_check` failures per day, and the latest Telegram messages with their delivery status.
+
 ## Downloads and packages
 
 A `download` task turns one video into an episode:

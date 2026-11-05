@@ -16,7 +16,7 @@ from .validate import parse_int, parse_url
 class Field:
     key: str
     label: str
-    kind: str  # "int" | "text" | "url" | "secret"
+    kind: str  # "int" | "bool" | "text" | "url" | "secret"
     group: str
     default: object = None
     minimum: int = 0
@@ -42,13 +42,19 @@ FIELDS = (
     Field("lease_seconds", "Task lease duration", "int", "Queue", 300, 30, 3600, unit="seconds"),
     Field("escalation_deadline_min", "Escalation deadline", "int", "Queue", 10, 1, 1440, unit="minutes",
           hint="An unclaimed task becomes visible to the next tier after this time."),
-    Field("failure_threshold", "Failed attempts before pausing a task (N)", "int", "Queue", 4, 1, 100),
+    Field("failure_threshold", "Failed attempts before pausing a task (N)", "int", "Queue", 4, 1, 100,
+          hint="Counted per task: bot_check, internal and incomplete fully, network and timeout a quarter. "
+               "Also needs failures from two different workers (one if only one worker is active)."),
+    Field("task_reopen_hours", "A paused task reopens by itself after", "int", "Queue", 6, 1, 168, unit="hours"),
     Field("worker_online_seconds", "Worker counts as online if seen within", "int", "Workers", 120, 30, 3600,
           unit="seconds"),
     Field("stats_retention_days", "Keep daily hit counters for", "int", "Statistics", 730, 30, 3650, unit="days",
           hint="Older counters are deleted every night."),
     Field("telegram_token", "Telegram bot token", "secret", "Telegram", ""),
-    Field("telegram_chat_id", "Telegram chat id", "text", "Telegram", "", optional=True),
+    Field("worker_offline_alert_min", "Message when a worker has been offline for", "int", "Telegram", 15, 1, 1440, unit="minutes"),
+    Field("telegram_new_episode", "Message for every new episode", "bool", "Telegram", 0),
+    Field("telegram_chat_id", "Telegram chat id", "text", "Telegram", "", optional=True,
+          hint="Filled in when you link a chat with the button below. Enter one by hand for a group or channel."),
 )
 BY_KEY = {f.key: f for f in FIELDS}
 
@@ -64,7 +70,7 @@ def groups() -> list[tuple[str, list[Field]]]:
 
 
 def _convert(field: Field, raw: str):
-    if field.kind == "int":
+    if field.kind in ("int", "bool"):
         try:
             return int(raw)
         except ValueError:
@@ -107,6 +113,8 @@ def validate(form, env_defaults: dict | None = None) -> tuple[dict, dict]:
                     changes[f.key] = raw
                 else:
                     errors[f.key] = "does not look like a Telegram bot token (123456:ABC…)"
+        elif f.kind == "bool":
+            changes[f.key] = 1 if form.get(f.key) else 0
         elif f.kind == "int":
             value, err = parse_int(raw, minimum=f.minimum, maximum=f.maximum, optional=f.optional)
             if err:

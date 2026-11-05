@@ -153,9 +153,11 @@ def scan_result(task_id: int, body: ScanResult, request: Request, worker: dict =
 @router.post("/tasks/{task_id}/fail", response_model=FailResponse)
 def fail(task_id: int, body: FailRequest, request: Request, worker: dict = Depends(authenticate)):
     def run(conn):
-        extra = tuple(s for s in (settings.get(conn, "telegram_token"),) if s)
+        all_settings = settings.get_all(conn, {"base_url": request.app.state.config.base_url})
+        extra = tuple(s for s in (all_settings["telegram_token"],) if s)
         state, not_before = queue.fail(conn, task_id, worker["id"], body.error_class, body.message,
-                                       body.retry_after_seconds, extra_secrets=extra)
+                                       body.retry_after_seconds, extra_secrets=extra,
+                                       policy=queue.Policy.from_settings(all_settings))
         return FailResponse(state=state, not_before=not_before)
     log.info("Worker %r reports %s for task %d", worker["name"], body.error_class, task_id)
     return _with_conn(request, run)
@@ -244,7 +246,8 @@ def _complete(request: Request, task_id: int, worker: dict, body: CompleteReques
         names = packages.plan_names(info["title"], task["video_id"], files, packages.taken_bases(conn, task["podcast_id"], target))
         moved = packages.move_into_media(files, names, target)
         try:
-            queue.complete_download(conn, task_id, worker["id"], packages.episode_fields(info, names, files))
+            policy = queue.Policy.from_settings(settings.get_all(conn, {"base_url": config.base_url}))
+            queue.complete_download(conn, task_id, worker["id"], packages.episode_fields(info, names, files), policy=policy)
         except BaseException as exc:
             packages.rollback_move(moved)                      # back to staging: the worker can call complete again
             if isinstance(exc, queue.QueueError):

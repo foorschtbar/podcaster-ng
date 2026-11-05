@@ -4,6 +4,7 @@
 {% block content %}
   <h1>Settings</h1>
   {% if flash %}<p class="notice" role="status">{{ flash }}</p>{% endif %}
+  {% if notice_error %}<p class="error" role="alert">{{ notice_error }}</p>{% endif %}
   {% if errors %}<p class="error" role="alert">Please fix the marked fields. Nothing was saved.</p>{% endif %}
   <form method="post" action="/settings" class="card">
     <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
@@ -20,6 +21,8 @@
           {% if secrets_set[f.key] %}
           <label class="check"><input type="checkbox" name="clear_{{ f.key }}" value="1"> Remove stored {{ f.label|lower }}</label>
           {% endif %}
+        {% elif f.kind == 'bool' %}
+          <label class="check"><input type="checkbox" name="{{ f.key }}" value="1"{% if v[f.key] %} checked{% endif %}> {{ f.label }}</label>
         {% else %}
           {{ field(f.key, f.label ~ (' (' ~ f.unit ~ ')' if f.unit else ''), v[f.key], errors[f.key], f.hint,
                    numeric=(f.kind == 'int')) }}
@@ -27,6 +30,28 @@
       {% endfor %}
     {% endfor %}
     <button type="submit">Save settings</button>
+  </form>
+  <h2 id="telegram">Telegram</h2>
+  {% if secrets_set.telegram_token %}
+  <p class="muted small">Save the bot token first, then link your chat: create the link, open it in Telegram and press <em>Start</em>.</p>
+  <form method="post" action="/settings/telegram-link">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+    <button type="submit" class="secondary">{{ 'Create a new link' if link_url else 'Create link to the bot' }}</button>
+  </form>
+  {% if link_url %}
+  <p>Open <a href="{{ link_url }}" target="_blank" rel="noopener noreferrer">t.me/{{ bot_name }}</a> and press <em>Start</em>, then:</p>
+  <form method="post" action="/settings/telegram-link/check">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+    <button type="submit">I pressed Start – link the chat</button>
+  </form>
+  {% endif %}
+  {% else %}
+  <p class="muted small">Enter the bot token above (from @BotFather) and save to link a chat.</p>
+  {% endif %}
+  <p class="muted small">Sends a message with the <em>saved</em> token and chat id.</p>
+  <form method="post" action="/settings/telegram-test">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+    <button type="submit" class="secondary">Send test message</button>
   </form>
   <h2>Import</h2>
   <p class="muted">Take over podcasts and episodes from the old Podcaster.</p>

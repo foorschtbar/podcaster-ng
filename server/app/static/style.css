@@ -160,3 +160,7 @@ select { display: block; width: 100%; margin-top: .25rem; padding: .65rem .7rem;
 dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 0 0 .5rem; }
 dl.facts dt { color: var(--muted); } dl.facts dd { margin: 0; min-width: 0; }
 h3.small { margin: .75rem 0 .25rem; font-weight: 600; }
+
+.badge.warn { color: var(--status-warn-text, #8a5a00); border-color: var(--status-warn); font-weight: 600; }
+.item.paused { border-left: 4px solid var(--status-warn); }
+@media (prefers-color-scheme: dark) { .badge.warn { color: var(--status-warn); } }

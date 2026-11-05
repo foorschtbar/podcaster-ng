@@ -29,7 +29,8 @@ from .web import CsrfError, LoginRequired, NotConfigured, locked_response
 log = logging.getLogger(__name__)
 
 
-def create_app(config: Config | None = None, limiter: LoginLimiter | None = None) -> FastAPI:
+def create_app(config: Config | None = None, limiter: LoginLimiter | None = None,
+               telegram_transport=None) -> FastAPI:
     config = config or Config.from_env()
 
     @asynccontextmanager
@@ -42,7 +43,8 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
         await run_in_threadpool(stats.cleanup_staging_once, config.db_path, config.staging_dir)  # stale uploads
         background = [asyncio.create_task(prune_loop(config.db_path, staging_dir=config.staging_dir))]
         if config.run_scheduler:
-            background.append(asyncio.create_task(scheduler_loop(config.db_path, config.scheduler_tick_seconds)))
+            background.append(asyncio.create_task(scheduler_loop(
+                config.db_path, config.scheduler_tick_seconds, {"base_url": config.base_url}, telegram_transport)))
         try:
             yield
         finally:
@@ -57,6 +59,7 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
     app.state.config = config
     app.state.limiter = limiter or LoginLimiter()
     app.state.import_job = ImportJob()
+    app.state.telegram_transport = telegram_transport  # tests replace the network
     # Invalid worker tokens: per client address. Valid workers: per worker.
     app.state.worker_auth_limiter = LoginLimiter(max_failures=10, window=300, lockout=300, delay=0)
     app.state.worker_rate_limiter = RateLimiter(limit=120, window=60)

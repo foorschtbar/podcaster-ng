@@ -59,11 +59,12 @@ def _detail(request, session, task_id, *, status_code=200, error=None, flash=Non
     with db(request) as conn:
         task = queue.get_task(conn, task_id)
         attempts = queue.attempts_of(conn, task_id) if task else []
+        events = queue.events_of(conn, task_id) if task else []
     if not task:
         return render(request, "not_found.html", session, status_code=404, active="tasks", title="Not found",
                       back="/tasks", back_label="Back to tasks")
     return render(request, "task_detail.html", session, status_code=status_code, active="tasks",
-                  title=f"Task {task_id}", task=task, attempts=attempts, error=error, flash=flash)
+                  title=f"Task {task_id}", task=task, attempts=attempts, events=events, error=error, flash=flash)
 
 
 @protected.get("/tasks/{task_id}", response_class=HTMLResponse, include_in_schema=False)

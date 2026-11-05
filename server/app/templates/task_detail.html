@@ -13,12 +13,14 @@
       {% if task.not_before %}<dt>Not before</dt><dd>{{ task.not_before }} ({{ task.not_before | until }})</dd>{% endif %}
       {% if task.worker_name %}<dt>Claimed by</dt><dd>{{ task.worker_name }}{% if task.lease_until %}, lease until {{ task.lease_until }} ({{ task.lease_until | until }}){% endif %}</dd>{% endif %}
       {% if task.progress %}<dt>Progress</dt><dd>{{ task.progress }}</dd>{% endif %}
+      <dt>Tier</dt><dd>visible to workers up to tier {{ task.tier }}</dd>
+      {% if task.pause_reason %}<dt>Paused</dt><dd>{{ task.pause_reason }}{% if task.reopen_at %}; reopens {{ task.reopen_at }} ({{ task.reopen_at | until }}){% endif %}</dd>{% endif %}
       <dt>Failed attempts</dt><dd>{{ task.failures }}</dd>
       {% if task.finished_at %}<dt>Finished</dt><dd>{{ task.finished_at }}</dd>{% endif %}
     </dl>
     <div class="actions">
-      {% if task.state == 'claimed' %}
-      <form method="post" action="/tasks/{{ task.id }}/release"><input type="hidden" name="csrf_token" value="{{ session.csrf }}"><button type="submit" class="secondary">Release</button></form>
+      {% if task.state in ('claimed', 'paused') %}
+      <form method="post" action="/tasks/{{ task.id }}/release"><input type="hidden" name="csrf_token" value="{{ session.csrf }}"><button type="submit" class="secondary">{{ 'Release (reopen)' if task.state == 'paused' else 'Release' }}</button></form>
       {% endif %}
       {% if task.state in ('pending', 'paused', 'closed') %}
       <form method="post" action="/tasks/{{ task.id }}/retry"><input type="hidden" name="csrf_token" value="{{ session.csrf }}"><button type="submit" class="secondary">{{ 'Retry now' if task.state == 'pending' else 'Retry' }}</button></form>
@@ -28,6 +30,12 @@
       {% endif %}
     </div>
   </div>
+  {% if events %}
+  <h2>Escalation history</h2>
+  <ul class="plain small">
+  {% for e in events %}<li><span class="badge {{ 'on' if e.kind == 'reopened' else 'off' }}">{{ e.kind }}</span> {{ e.at }} · {{ e.detail }}</li>{% endfor %}
+  </ul>
+  {% endif %}
   <h2>Attempts ({{ attempts | length }})</h2>
   {% if not attempts %}<p class="muted">None yet.</p>{% endif %}
   {% for a in attempts %}

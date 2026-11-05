@@ -96,7 +96,7 @@ def test_worker_connects_appears_online_and_goes_offline(env):
     server = Server(config, port).start()
     worker = WorkerThread(cfg()).start()
     try:
-        assert wait_for(lambda: row()["last_seen"] is not None), "worker never connected"
+        assert wait_for(lambda: row()["last_seen"] is not None and row()["version"]), "worker never said hello"
         r = row()
         assert r["version"] and workers.status(r, 120) == "online"
         # it keeps pinging: last_seen advances

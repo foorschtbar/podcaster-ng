@@ -40,6 +40,7 @@ def csrf_of(client):
 def settings_form(**over):
     """A complete, valid settings form (all defaults), so tests do not break when a setting is added."""
     from app import settings
-    form = {f.key: ("" if f.default is None else str(f.default)) for f in settings.FIELDS if f.kind != "secret"}
+    # secrets stay out; a checkbox is "off" when it is absent from the form
+    form = {f.key: ("" if f.default is None else str(f.default)) for f in settings.FIELDS if f.kind not in ("secret", "bool")}
     form.update(over)
     return form

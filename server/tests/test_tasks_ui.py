@@ -119,7 +119,7 @@ def test_release_retry_close_actions(c):
 def test_impossible_actions_show_a_message(c):
     scan, d1, d2, _ = seed(c)
     r = post(c, f"/tasks/{d1}/release")                      # pending, not claimed
-    assert r.status_code == 409 and "Not possible: only a claimed task can be released" in r.text
+    assert r.status_code == 409 and "Not possible: only a claimed or paused task can be released" in r.text
     r = post(c, f"/tasks/{d2}/close")                        # already closed
     assert r.status_code == 409 and "only an open task" in r.text
     q(c, lambda x: x.execute("UPDATE tasks SET state = 'done' WHERE id = ?", (d1,)))

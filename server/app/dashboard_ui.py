@@ -5,7 +5,9 @@ from datetime import timedelta
 from fastapi import Depends, Request
 from fastapi.responses import HTMLResponse
 
-from . import charts, queue, settings, stats
+from datetime import timedelta as _td
+
+from . import charts, notifications, queue, settings, stats
 from .workers_ui import worker_cards
 from .web import Session, db, env_defaults, protected, render, require_session, templates
 
@@ -38,6 +40,8 @@ def dashboard_context(conn, data_dir, env_defaults: dict | None = None) -> dict:
         "apps_files": _shares(stats.app_shares(conn, "file", DAYS, today)),
         "apps_feeds": _shares(stats.app_shares(conn, "feed", DAYS, today)),
         "queue": queue.counts(conn),
+        "attempt_stats": _attempt_stats(conn),
+        "messages": notifications.recent(conn, 5),
         "recent_errors": queue.recent_errors(conn, 5),
         "workers": worker_list,
         "workers_online": sum(1 for w in worker_list if w["status"] == "online"),
@@ -58,3 +62,14 @@ def dashboard(request: Request, session: Session = Depends(require_session)):
     with db(request) as conn:
         ctx = dashboard_context(conn, request.app.state.config.data_dir, env_defaults(request))
     return render(request, "dashboard.html", session, active="dashboard", title="Dashboard", **ctx)
+
+
+def _attempt_stats(conn) -> dict:
+    stats_ = queue.error_stats(conn, days=14)
+    days = [stats.today() - _td(days=13 - i) for i in range(14)]
+    values = [stats_["bot_check_per_day"].get(d.isoformat(), 0) for d in days]
+    rows = [{**w, "rate": round(100 * w["ok"] / (w["ok"] + w["failed"])) if (w["ok"] + w["failed"]) else None}
+            for w in stats_["workers"]]
+    return {"workers": rows, "bot_total": sum(values), "bot_peak": max(values, default=0),
+            "bot_chart": charts.column_chart(days, values, label="bot_check failures per day, last 14 days",
+                                             unit="bot_check failures")}

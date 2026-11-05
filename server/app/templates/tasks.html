@@ -17,12 +17,13 @@
   </form>
   {% if not tasks %}<p class="muted">No tasks{% if state or podcast or type %} match the filter{% endif %}.</p>{% endif %}
   {% for t in tasks %}
-  <article class="card item">
+  <article class="card item{{ ' paused' if t.state == 'paused' }}">
     <div class="item-head">
       <a href="/tasks/{{ t.id }}"><strong>#{{ t.id }} {{ t.type }}</strong> <span class="muted">{{ t.podcast_name }}</span></a>
-      <span class="badge {{ 'on' if t.state in ('claimed', 'done') else 'off' }}">{{ t.state }}</span>
+      <span class="badge {{ 'on' if t.state in ('claimed', 'done') else ('warn' if t.state == 'paused' else 'off') }}">{{ t.state }}</span>
     </div>
     {% if t.type == 'download' %}<div class="small">{{ t.title or t.video_id }}</div>{% endif %}
+    {% if t.state == 'paused' %}<div class="small"><strong>Paused:</strong> {{ t.pause_reason }}</div>{% endif %}
     <div class="muted small">
       {% if t.worker_name %}worker {{ t.worker_name }} · {% endif %}{{ t.attempt_count }} attempt(s){% if t.failures %} · {{ t.failures }} failed{% endif %}
       {% if t.not_before and t.state == 'pending' %} · waits until {{ t.not_before | until }}{% endif %} · updated {{ t.updated_at | until }}

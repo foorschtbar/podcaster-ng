@@ -431,7 +431,8 @@ def test_retryable_failure_backs_off_and_grows(conn):
     t = NOW
     waits = []
     for n in range(1, 7):
-        state, not_before = queue.fail(conn, tid, w["id"], "bot_check", "Sign in to confirm you're not a bot", now=t)
+        state, not_before = queue.fail(conn, tid, w["id"], "bot_check", "Sign in to confirm you're not a bot", now=t,
+                                       policy=queue.Policy(failure_threshold=999))   # pausing has its own tests
         assert state == "pending"
         waits.append(int((queue.parse(not_before) - t).total_seconds()))
         assert task(conn, tid)["failures"] == n

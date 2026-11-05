@@ -20,8 +20,9 @@ def test_tick_creates_scans_for_active_podcasts_only_once(db):
     c = connect(db)
     add_podcast(c, "a")
     add_podcast(c, "b", active=0)
-    assert scheduler.tick(db) == {"expired": 0, "scans_created": 1}
-    assert scheduler.tick(db) == {"expired": 0, "scans_created": 0}          # one open scan is enough
+    first, second = scheduler.tick(db), scheduler.tick(db)
+    assert (first["expired"], first["scans_created"]) == (0, 1)
+    assert second["scans_created"] == 0                                        # one open scan is enough
     assert [(r["podcast_id"], r["state"]) for r in queue.list_tasks(c)] == [("a", "pending")]
     c.close()
 

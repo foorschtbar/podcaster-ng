@@ -10,9 +10,11 @@ by the alerting step later; ``closed`` also covers private/removed videos and ma
 
 import sqlite3
 from contextlib import contextmanager
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from . import notifications
 from .scrub import clean
 from .workers import TIME_FORMAT
 
@@ -25,6 +27,30 @@ DEFAULT_NOT_YET_AVAILABLE = 1800
 SCAN_RETENTION_DAYS = 14
 RETRYABLE = {"bot_check", "network", "timeout", "internal", "incomplete"}
 PREMIERE_STATES = {"is_upcoming", "is_live", "post_live"}
+COOLDOWN_SECONDS = 600   # a worker does not get a task back that it has just failed
+# Classes whose failure makes the task visible to the next tier at once. network/timeout are retried with
+# backoff on the same tier; not_yet_available, private and removed never escalate.
+ESCALATING = {"bot_check", "internal", "incomplete"}
+# How much a failed attempt counts towards pausing a task (network problems count weakly).
+FAIL_WEIGHTS = {"bot_check": 1.0, "internal": 1.0, "incomplete": 1.0, "network": 0.25, "timeout": 0.25}
+
+
+@dataclass(frozen=True)
+class Policy:
+    """Settings the queue rules depend on."""
+    failure_threshold: int = 4
+    reopen_hours: int = 6
+    escalation_deadline_s: int = 600
+    notify_new_episode: bool = False
+    base_url: str = ""
+
+    @classmethod
+    def from_settings(cls, s: dict) -> "Policy":
+        return cls(int(s["failure_threshold"]), int(s["task_reopen_hours"]), int(s["escalation_deadline_min"]) * 60,
+                   bool(s.get("telegram_new_episode")), s.get("base_url") or "")
+
+
+DEFAULT_POLICY = Policy()
 
 
 class QueueError(Exception):
@@ -107,24 +133,131 @@ def schedule_scans(conn: sqlite3.Connection, default_interval_min: int, now: dat
     return created
 
 
+# --- escalation, pausing and reopening ------------------------------------------------------------------
+
+def _event(conn: sqlite3.Connection, task_id: int, now: datetime, kind: str, detail: str = "") -> None:
+    conn.execute("INSERT INTO task_events (task_id, at, kind, detail) VALUES (?, ?, ?, ?)", (task_id, ts(now), kind, detail))
+
+
+def _next_tier(conn: sqlite3.Connection, tier: int) -> int | None:
+    """The next worker tier above ``tier`` that has an active worker (tiers without workers are skipped)."""
+    return conn.execute("SELECT MIN(tier) FROM workers WHERE active = 1 AND tier > ?", (tier,)).fetchone()[0]
+
+
+def _escalate(conn: sqlite3.Connection, task_id: int, tier: int, now: datetime, why: str) -> int | None:
+    """Make the task visible to the next tier. Returns the new tier, or None if there is no higher tier."""
+    new = _next_tier(conn, tier)
+    if new is None:
+        return None
+    conn.execute("UPDATE tasks SET tier = ?, tier_since = ?, updated_at = ? WHERE id = ?", (new, ts(now), ts(now), task_id))
+    _event(conn, task_id, now, "escalated", f"now visible to tier {new}: {why}")
+    return new
+
+
+def _escalate_overdue(conn: sqlite3.Connection, now: datetime, policy: Policy) -> int:
+    """Pending tasks that no worker of their tier took within the deadline move up one tier."""
+    cutoff = ts(now - timedelta(seconds=policy.escalation_deadline_s))
+    rows = conn.execute("SELECT id, tier FROM tasks WHERE state = 'pending' AND COALESCE(tier_since, created_at) < ? "
+                        "AND (not_before IS NULL OR not_before < ?)", (cutoff, cutoff)).fetchall()
+    moved = 0
+    for r in rows:
+        if _escalate(conn, r["id"], r["tier"], now, f"no tier {r['tier']} worker took it within "
+                                                     f"{policy.escalation_deadline_s // 60} min") is not None:
+            moved += 1
+    return moved
+
+
+def escalate_overdue(conn: sqlite3.Connection, now: datetime | None = None, policy: Policy = DEFAULT_POLICY) -> int:
+    with transaction(conn):
+        return _escalate_overdue(conn, now or utcnow(), policy)
+
+
+def _short(text: str | None, limit: int) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _assess(conn: sqlite3.Connection, task_id: int, now: datetime, policy: Policy) -> bool:
+    """Pause a pending task that has failed too often. Returns True if it was paused.
+
+    The failures since the last reopening are weighed by class; the task is paused when the weight reaches
+    the threshold N and the failures come from at least two workers (from one if only one worker is active:
+    two are impossible then and a lone blocked worker must still raise the alarm).
+    """
+    task = conn.execute("SELECT t.*, p.name AS podcast_name FROM tasks t JOIN podcasts p ON p.id = t.podcast_id "
+                        "WHERE t.id = ?", (task_id,)).fetchone()
+    if task is None or task["state"] != "pending":
+        return False
+    rows = conn.execute("SELECT worker_id, worker_name, error_class, error_text FROM attempts WHERE task_id = ? AND id > ? "
+                        "AND result IN ('failed', 'lease_expired') ORDER BY id", (task_id, task["reset_attempt_id"])).fetchall()
+    counted = [r for r in rows if FAIL_WEIGHTS.get(r["error_class"], 0) > 0]
+    score = sum(FAIL_WEIGHTS[r["error_class"]] for r in counted)
+    names = {r["worker_id"] if r["worker_id"] is not None else r["worker_name"] for r in counted}
+    active = conn.execute("SELECT COUNT(*) FROM workers WHERE active = 1").fetchone()[0]
+    if score < policy.failure_threshold or len(names) < min(2, max(1, active)):
+        return False
+    per_worker = Counter(r["worker_name"] or "?" for r in counted)
+    reopen_at = ts(now + timedelta(hours=policy.reopen_hours))
+    reason = f"{len(counted)} failed attempts from {len(per_worker)} worker(s), last: {counted[-1]['error_class']}"
+    conn.execute("UPDATE tasks SET state = 'paused', pause_reason = ?, pause_count = pause_count + 1, reopen_at = ?, "
+                 "not_before = NULL, updated_at = ? WHERE id = ?", (reason, reopen_at, ts(now), task_id))
+    _event(conn, task_id, now, "paused", reason)
+    title = task["title"] or task["video_id"] or "playlist scan"
+    lines = [f"⏸ Task #{task_id} paused: {task['podcast_name']} – {title}"]
+    if task["video_id"]:
+        lines.append(f"Video: {task['video_id']}")
+    lines.append(f"{len(counted)} failed attempts (weight {score:g}) from {len(per_worker)} worker(s): "
+                 + ", ".join(f"{w} ×{c}" for w, c in per_worker.most_common()))
+    lines.append("Last errors:")
+    lines += [f"• {r['worker_name'] or '?'} ({r['error_class']}): {_short(r['error_text'], 200)}" for r in counted[-3:]]
+    lines.append(f"It reopens by itself at {reopen_at} (UTC); release or close it in the UI"
+                 + (f": {policy.base_url.rstrip('/')}/tasks/{task_id}" if policy.base_url else "."))
+    notifications.enqueue(conn, "task_paused", f"task_paused:{task_id}:{task['pause_count'] + 1}", "\n".join(lines), now)
+    return True
+
+
+def _reopen(conn: sqlite3.Connection, task_id: int, now: datetime, how: str) -> None:
+    """Make a paused or closed task pending again with a clean slate: tier 1, no failures counted."""
+    last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM attempts WHERE task_id = ?", (task_id,)).fetchone()[0]
+    try:
+        conn.execute("UPDATE tasks SET state = 'pending', tier = 1, tier_since = ?, not_before = NULL, pause_reason = NULL, "
+                     "reopen_at = NULL, reset_attempt_id = ?, failures = 0, finished_at = NULL, updated_at = ? WHERE id = ?",
+                     (ts(now), last, ts(now), task_id))
+    except sqlite3.IntegrityError:
+        raise BadState("another scan of this podcast is already open") from None
+    _event(conn, task_id, now, "reopened", how)
+
+
+def reopen_due(conn: sqlite3.Connection, now: datetime | None = None) -> int:
+    """Reopen paused tasks whose timer has run out."""
+    now = now or utcnow()
+    with transaction(conn):
+        rows = conn.execute("SELECT id FROM tasks WHERE state = 'paused' AND reopen_at IS NOT NULL AND reopen_at <= ?",
+                            (ts(now),)).fetchall()
+        for r in rows:
+            _reopen(conn, r["id"], now, "the reopen timer ran out")
+        return len(rows)
+
+
 # --- lease expiry ----------------------------------------------------------------------------------
 
-def _expire(conn: sqlite3.Connection, now: datetime) -> int:
+def _expire(conn: sqlite3.Connection, now: datetime, policy: Policy = DEFAULT_POLICY) -> int:
     stamp = ts(now)
     rows = conn.execute("SELECT id FROM tasks WHERE state = 'claimed' AND lease_until < ?", (stamp,)).fetchall()
     for r in rows:
         conn.execute("UPDATE tasks SET state = 'pending', claimed_by = NULL, lease_until = NULL, progress = '', "
-                     "failures = failures + 1, updated_at = ? WHERE id = ?", (stamp, r["id"]))
+                     "failures = failures + 1, tier_since = ?, updated_at = ? WHERE id = ?", (stamp, stamp, r["id"]))
         conn.execute("UPDATE attempts SET ended_at = ?, result = 'lease_expired', error_class = 'timeout', "
                      "error_text = 'The lease expired: no heartbeat from the worker' "
                      "WHERE task_id = ? AND result IS NULL", (stamp, r["id"]))
+        _assess(conn, r["id"], now, policy)
     return len(rows)
 
 
-def expire_leases(conn: sqlite3.Connection, now: datetime | None = None) -> int:
+def expire_leases(conn: sqlite3.Connection, now: datetime | None = None, policy: Policy = DEFAULT_POLICY) -> int:
     """Return tasks with an expired lease to pending and record a ``lease_expired`` attempt."""
     with transaction(conn):
-        return _expire(conn, now or utcnow())
+        return _expire(conn, now or utcnow(), policy)
 
 
 # --- claiming ----------------------------------------------------------------------------------------
@@ -192,19 +325,29 @@ def claim(conn: sqlite3.Connection, worker: dict, types: list[str], defaults: di
     Rules: one task at a time per worker; only pending tasks that are due (not_before) of active
     podcasts and of the requested types; scans before downloads, oldest first; for downloads the
     pacing limits (downloads per hour, pause between downloads) apply, the worker's value capping
-    the podcast's. Escalation across tiers comes later: all tiers see all tasks for now.
+    the podcast's. Tier rule: a task is visible to workers of its current tier and below; it moves up
+    when a worker of that tier failed it (see ``fail``) or nobody took it within the deadline. A worker
+    does not get back a task it reported as failed in the last ten minutes, as long as another worker
+    could take it (a crash that only expired the lease is not held against it; a manual retry resets it).
     """
     now = now or utcnow()
+    policy = Policy.from_settings(defaults)
     with transaction(conn):
-        _expire(conn, now)
+        _expire(conn, now, policy)
+        _escalate_overdue(conn, now, policy)
         if conn.execute("SELECT 1 FROM tasks WHERE claimed_by = ? AND state = 'claimed'", (worker["id"],)).fetchone():
             return Claim(None, IDLE_HINT)
         marks = ",".join("?" * len(types))
         candidates = conn.execute(
             "SELECT t.*, p.pause_min_s AS p_pause_min, p.pause_max_s AS p_pause_max, p.downloads_per_hour AS p_dph "
             f"FROM tasks t JOIN podcasts p ON p.id = t.podcast_id WHERE t.state = 'pending' AND t.type IN ({marks}) "
-            "AND (t.not_before IS NULL OR t.not_before <= ?) AND p.active = 1 "
-            "ORDER BY (t.type != 'scan'), t.id LIMIT 100", [*types, ts(now)]).fetchall()
+            "AND (t.not_before IS NULL OR t.not_before <= ?) AND p.active = 1 AND t.tier >= ? "
+            # cool-down: not a task this worker just failed, but only if some other worker could take it instead
+            "AND NOT (EXISTS (SELECT 1 FROM attempts a WHERE a.task_id = t.id AND a.worker_id = ? AND a.id > t.reset_attempt_id "
+            "AND a.result = 'failed' AND a.ended_at > ?) "
+            "AND EXISTS (SELECT 1 FROM workers o WHERE o.active = 1 AND o.id != ? AND o.tier <= t.tier)) "
+            "ORDER BY (t.type != 'scan'), t.id LIMIT 100",
+            [*types, ts(now), worker["tier"], worker["id"], ts(now - timedelta(seconds=COOLDOWN_SECONDS)), worker["id"]]).fetchall()
         wait: int | None = None
         usage = None
         for c in candidates:
@@ -267,7 +410,7 @@ def owned_attempt(conn: sqlite3.Connection, task_id: int, worker_id: int) -> tup
 
 
 def complete_download(conn: sqlite3.Connection, task_id: int, worker_id: int, fields: dict,
-                      now: datetime | None = None) -> None:
+                      now: datetime | None = None, policy: Policy = DEFAULT_POLICY) -> None:
     """Publish a verified package: create (or revive) the episode row and mark the task done, in one transaction.
 
     The files are already in the media directory; the feed only lists rows, so nothing shows up before this.
@@ -295,6 +438,11 @@ def complete_download(conn: sqlite3.Connection, task_id: int, worker_id: int, fi
                      "updated_at = ? WHERE id = ?", (ts(now), ts(now), task_id))
         conn.execute("UPDATE attempts SET ended_at = ?, result = 'ok', note = ? WHERE task_id = ? AND result IS NULL",
                      (ts(now), f"published {fields['audio_file']} ({fields['size_bytes']} bytes)", task_id))
+        if policy.notify_new_episode:
+            name = conn.execute("SELECT name FROM podcasts WHERE id = ?", (task["podcast_id"],)).fetchone()["name"]
+            link = f"\n{policy.base_url.rstrip('/')}/{task['podcast_id']}.xml" if policy.base_url else ""
+            notifications.enqueue(conn, "episode_new", f"episode_new:{task['podcast_id']}:{task['video_id']}",
+                                  f"🎧 New episode: {name} – {fields['title']}{link}", now)
 
 
 # --- results ------------------------------------------------------------------------------------------
@@ -349,14 +497,16 @@ def backoff_seconds(failures: int) -> int:
 
 def fail(conn: sqlite3.Connection, task_id: int, worker_id: int, error_class: str, message: str,
          retry_after: int | None = None, now: datetime | None = None,
-         extra_secrets: tuple[str, ...] = ()) -> tuple[str, str | None]:
+         extra_secrets: tuple[str, ...] = (), policy: Policy = DEFAULT_POLICY) -> tuple[str, str | None]:
     """Record a failed attempt. Returns ``(new state, not_before)``.
 
     - ``not_yet_available`` (premiere/live, downloads only): not an error, the task waits until
       ``not_before`` and the failure counter does not move;
     - ``private`` / ``removed``: the task is closed, no retry;
     - everything else is retried after a growing backoff (the same worker is not offered the
-      task before it is due again).
+      task before it is due again). ``bot_check``, ``internal`` and ``incomplete`` also make the task
+      visible to the next tier at once (if the failing worker belongs to the task's current tier);
+      then the task is paused if it has failed too often (see ``_assess``).
     """
     now = now or utcnow()
     text = clean(message, 500, extra_secrets)
@@ -380,6 +530,15 @@ def fail(conn: sqlite3.Connection, task_id: int, worker_id: int, error_class: st
                      "updated_at = ?, finished_at = ? WHERE id = ?", (state, not_before, failures, ts(now), finished, task_id))
         conn.execute("UPDATE attempts SET ended_at = ?, result = ?, error_class = ?, error_text = ? "
                      "WHERE task_id = ? AND result IS NULL", (ts(now), result, error_class, text, task_id))
+        if state == "pending":
+            conn.execute("UPDATE tasks SET tier_since = ? WHERE id = ?", (ts(now), task_id))
+            if error_class in ESCALATING:
+                row = conn.execute("SELECT tier FROM workers WHERE id = ?", (worker_id,)).fetchone()
+                if row is None or row["tier"] >= task["tier"]:  # a failure of the current (or a higher) tier
+                    _escalate(conn, task_id, task["tier"], now, f"a tier {row['tier'] if row else task['tier']} worker failed it "
+                                                              f"({error_class})")
+            if result == "failed" and _assess(conn, task_id, now, policy):
+                state, not_before = "paused", None
         return state, not_before
 
 
@@ -398,13 +557,17 @@ def _get(conn: sqlite3.Connection, task_id: int) -> sqlite3.Row:
 
 
 def release(conn: sqlite3.Connection, task_id: int, now: datetime | None = None) -> None:
-    """Take a claimed task away from its worker and make it pending again."""
+    """Take a claimed task away from its worker, or reopen a paused one; either way it is pending again."""
     now = now or utcnow()
     with transaction(conn):
-        if _get(conn, task_id)["state"] != "claimed":
-            raise BadState("only a claimed task can be released")
-        conn.execute("UPDATE tasks SET state = 'pending', claimed_by = NULL, lease_until = NULL, progress = '', updated_at = ? WHERE id = ?",
-                     (ts(now), task_id))
+        state = _get(conn, task_id)["state"]
+        if state == "paused":
+            _reopen(conn, task_id, now, "released manually")
+            return
+        if state != "claimed":
+            raise BadState("only a claimed or paused task can be released")
+        conn.execute("UPDATE tasks SET state = 'pending', claimed_by = NULL, lease_until = NULL, progress = '', tier_since = ?, "
+                     "updated_at = ? WHERE id = ?", (ts(now), ts(now), task_id))
         _close_open_attempt(conn, task_id, now, "released manually")
 
 
@@ -415,11 +578,12 @@ def retry(conn: sqlite3.Connection, task_id: int, now: datetime | None = None) -
         task = _get(conn, task_id)
         if task["state"] not in ("pending", "paused", "closed"):
             raise BadState("only a waiting, paused or closed task can be retried")
-        try:
-            conn.execute("UPDATE tasks SET state = 'pending', not_before = NULL, pause_reason = NULL, finished_at = NULL, "
-                         "updated_at = ? WHERE id = ?", (ts(now), task_id))
-        except sqlite3.IntegrityError:
-            raise BadState("another scan of this podcast is already open") from None
+        if task["state"] == "pending":  # waiting for not_before or a backoff: make it due now, with a clean slate
+            last = conn.execute("SELECT COALESCE(MAX(id), 0) FROM attempts WHERE task_id = ?", (task_id,)).fetchone()[0]
+            conn.execute("UPDATE tasks SET not_before = NULL, tier_since = ?, reset_attempt_id = ?, updated_at = ? WHERE id = ?",
+                         (ts(now), last, ts(now), task_id))
+        else:
+            _reopen(conn, task_id, now, "retried manually")
 
 
 def close(conn: sqlite3.Connection, task_id: int, now: datetime | None = None) -> None:
@@ -456,6 +620,25 @@ def get_task(conn: sqlite3.Connection, task_id: int) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT t.*, p.name AS podcast_name, w.name AS worker_name FROM tasks t JOIN podcasts p ON p.id = t.podcast_id "
         "LEFT JOIN workers w ON w.id = t.claimed_by WHERE t.id = ?", (task_id,)).fetchone()
+
+
+def events_of(conn: sqlite3.Connection, task_id: int) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM task_events WHERE task_id = ? ORDER BY id DESC", (task_id,)).fetchall()
+
+
+def error_stats(conn: sqlite3.Connection, now: datetime | None = None, days: int = 14) -> dict:
+    """Download success per worker (last 7 days) and bot_check failures per day, for the dashboard."""
+    now = now or utcnow()
+    week = ts(now - timedelta(days=7))
+    per_worker = conn.execute(
+        "SELECT a.worker_name AS name, SUM(a.result = 'ok') AS ok, SUM(a.result IN ('failed', 'lease_expired')) AS failed "
+        "FROM attempts a JOIN tasks t ON t.id = a.task_id WHERE t.type = 'download' AND a.started_at >= ? "
+        "AND a.result IN ('ok', 'failed', 'lease_expired') GROUP BY a.worker_name ORDER BY a.worker_name", (week,)).fetchall()
+    since = (now - timedelta(days=days - 1)).date().isoformat()
+    per_day = {r["d"]: r["n"] for r in conn.execute(
+        "SELECT substr(started_at, 1, 10) AS d, COUNT(*) AS n FROM attempts WHERE error_class = 'bot_check' AND started_at >= ? "
+        "GROUP BY d", (since,))}
+    return {"workers": [dict(r) for r in per_worker], "bot_check_per_day": per_day}
 
 
 def attempts_of(conn: sqlite3.Connection, task_id: int) -> list[sqlite3.Row]:
