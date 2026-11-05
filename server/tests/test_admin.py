@@ -8,7 +8,7 @@ from app.main import create_app
 
 from helpers import PASSWORD, USER, csrf_of, do_login, login_token, make_client, make_config
 
-PAGES = ["/dashboard", "/podcasts", "/episodes", "/workers", "/tasks", "/settings"]
+PAGES = ["/dashboard", "/podcasts", "/episodes", "/workers", "/tasks", "/events", "/settings"]
 
 
 @pytest.fixture
