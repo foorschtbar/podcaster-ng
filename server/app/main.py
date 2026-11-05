@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 
 
 def create_app(config: Config | None = None, limiter: LoginLimiter | None = None,
-               telegram_transport=None) -> FastAPI:
+               telegram_transport=None, http_transport=None) -> FastAPI:
     config = config or Config.from_env()
 
     @asynccontextmanager
@@ -61,6 +61,7 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
     app.state.limiter = limiter or LoginLimiter()
     app.state.import_job = ImportJob()
     app.state.telegram_transport = telegram_transport  # tests replace the network
+    app.state.http_transport = http_transport
     # Invalid worker tokens: per client address. Valid workers: per worker.
     app.state.worker_auth_limiter = LoginLimiter(max_failures=10, window=300, lockout=300, delay=0)
     app.state.worker_rate_limiter = RateLimiter(limit=120, window=60)

@@ -11,6 +11,8 @@ from .db import connect
 log = logging.getLogger(__name__)
 
 UPLOAD_PATH = re.compile(r"^/api/worker/tasks/\d+/upload$")
+FORM_WITH_FILE = re.compile(r"^/podcasts(/[a-z0-9-]+)?$")   # the podcast form can carry a cover image
+FILE_FORM_LIMIT = 6 << 20
 ADMIN_HEADERS = {
     "Cache-Control": "no-store",
     "X-Frame-Options": "DENY",
@@ -59,8 +61,9 @@ class BodyLimit:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or UPLOAD_PATH.match(scope["path"]):
             return await self.app(scope, receive, send)
+        limit = FILE_FORM_LIMIT if scope["method"] == "POST" and FORM_WITH_FILE.match(scope["path"]) else self.limit
         declared = dict(scope["headers"]).get(b"content-length", b"0")
-        if declared.isdigit() and int(declared) > self.limit:
+        if declared.isdigit() and int(declared) > limit:
             return await self._reject(send)
         seen, started = 0, False
 
@@ -69,7 +72,7 @@ class BodyLimit:
             message = await receive()
             if message["type"] == "http.request":
                 seen += len(message.get("body", b""))
-                if seen > self.limit:
+                if seen > limit:
                     raise BodyTooLarge
             return message
 

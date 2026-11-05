@@ -54,10 +54,11 @@ def build_feed(podcast: sqlite3.Row, episodes: list[sqlite3.Row], base_url: str)
     # Stable between requests: the newest change, not "now".
     last_change = max([podcast["updated_at"], *(e["updated_at"] for e in episodes)])
 
+    cover = file_url(base_url, pid, podcast["cover_file"]) if podcast["cover_file"] else podcast["image_url"]
     channel = {
         "title": podcast["name"],
         "link": podcast["playlist_url"],
-        "image": podcast["image_url"],
+        "image": cover,
         "description": podcast["description"] or podcast["name"],
         "author": author,
         "last_build_date": _rfc2822_timestamp(last_change),
@@ -70,7 +71,7 @@ def build_feed(podcast: sqlite3.Row, episodes: list[sqlite3.Row], base_url: str)
         elif e["thumb_file"]:
             image = file_url(base_url, pid, e["thumb_file"])
         else:
-            image = podcast["image_url"]
+            image = cover
         items.append({
             "title": e["title"],
             "description": e["description"],
