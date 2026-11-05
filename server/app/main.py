@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from . import __version__
 from .auth import LoginLimiter, RateLimiter, load_session_secret
@@ -20,6 +21,7 @@ from .migrations import migrate
 from .public import router as public_router
 from .routes import router as admin_router
 from .scheduler import scheduler_loop
+from . import stats
 from .stats import prune_loop
 from .worker_api import router as worker_router
 from .web import CsrfError, LoginRequired, NotConfigured, locked_response
@@ -37,7 +39,8 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
         if not config.admin_configured:
             log.warning("ADMIN_USER/ADMIN_PASSWORD not set: admin UI is locked")
         log.info("PodcasterNG server %s started", __version__)
-        background = [asyncio.create_task(prune_loop(config.db_path))]
+        await run_in_threadpool(stats.cleanup_staging_once, config.db_path, config.staging_dir)  # stale uploads
+        background = [asyncio.create_task(prune_loop(config.db_path, staging_dir=config.staging_dir))]
         if config.run_scheduler:
             background.append(asyncio.create_task(scheduler_loop(config.db_path, config.scheduler_tick_seconds)))
         try:

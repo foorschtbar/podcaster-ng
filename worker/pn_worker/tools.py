@@ -4,7 +4,8 @@ import re
 import shutil
 import subprocess
 
-COMMANDS = {"ytdlp": ("yt-dlp", ["--version"]), "ffmpeg": ("ffmpeg", ["-version"]), "deno": ("deno", ["--version"])}
+COMMANDS = {"ytdlp": ("yt-dlp", ["--version"]), "ffmpeg": ("ffmpeg", ["-version"]), "ffprobe": ("ffprobe", ["-version"]),
+            "deno": ("deno", ["--version"])}
 _VERSION = re.compile(r"\d[\w.+-]*")
 
 
@@ -22,7 +23,7 @@ def _version(binary: str, args: list[str]) -> str | None:
 
 
 def detect() -> dict[str, str]:
-    """Versions of the tools that are installed, keyed ytdlp / ffmpeg / deno."""
+    """Versions of the tools that are installed, keyed ytdlp / ffmpeg / ffprobe / deno."""
     found = {}
     for key, (binary, args) in COMMANDS.items():
         version = _version(binary, args)

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
 
-from . import queue, settings
+from . import packages, queue, settings
 from .app_groups import OTHER
 from .db import connect
 
@@ -51,11 +51,23 @@ def prune(conn: sqlite3.Connection, retention_days: int, today_: date | None = N
     return conn.execute("DELETE FROM hits_daily WHERE day < ?", (cutoff,)).rowcount
 
 
-def prune_once(db_path: Path) -> int:
+def cleanup_staging_once(db_path: Path, staging_dir: Path | None) -> int:
+    if staging_dir is None:
+        return 0
+    conn = connect(db_path)
+    try:
+        return packages.cleanup_staging(conn, staging_dir)
+    finally:
+        conn.close()
+
+
+def prune_once(db_path: Path, staging_dir: Path | None = None) -> int:
     conn = connect(db_path)
     try:
         removed = prune(conn, settings.get(conn, "stats_retention_days"))
         old_scans = queue.prune(conn)
+        if staging_dir is not None:
+            packages.cleanup_staging(conn, staging_dir)
     finally:
         conn.close()
     if removed or old_scans:
@@ -71,12 +83,12 @@ def seconds_until(hour: int, minute: int, now: datetime | None = None) -> float:
     return (target - now).total_seconds()
 
 
-async def prune_loop(db_path: Path, first_delay: float = 60.0) -> None:
+async def prune_loop(db_path: Path, first_delay: float = 60.0, staging_dir: Path | None = None) -> None:
     """Prune shortly after start and then every night at 03:30 UTC."""
     await asyncio.sleep(first_delay)
     while True:
         try:
-            await run_in_threadpool(prune_once, db_path)
+            await run_in_threadpool(prune_once, db_path, staging_dir)
         except Exception:  # noqa: BLE001 - must never kill the loop
             log.exception("Pruning the hit counters failed")
         await asyncio.sleep(seconds_until(PRUNE_HOUR, PRUNE_MINUTE))

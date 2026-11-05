@@ -233,9 +233,9 @@ def test_task_runner_survives_server_errors_when_reporting(fake, tmp_path):
     run_task(ApiClient("https://x", "t", transport=httpx.MockTransport(handler)), task_info(), config(tmp_path))  # must not raise
 
 
-def test_download_tasks_are_refused_for_now(fake, tmp_path):
+def test_unknown_task_types_are_refused(fake, tmp_path):
     rec = Recorder()
-    info = task_info().model_copy(update={"type": "download", "video_id": "aaaaaaaaaaa"})
+    info = task_info().model_copy(update={"type": "download", "video_id": None})      # a download without a video id
     run_task(make(rec), info, config(tmp_path))
     body = [b for m, p, b in rec.calls if p.endswith("/fail")][0]
-    assert body["error_class"] == "internal" and "download" in body["message"]
+    assert body["error_class"] == "internal" and "cannot run" in body["message"]

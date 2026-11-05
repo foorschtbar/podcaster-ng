@@ -20,6 +20,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import yaml
+from pn_shared.chapters import build_chapters_json
 
 from . import episodes, podcasts, settings
 from .db import connect
@@ -119,15 +120,6 @@ def inside(root: Path, user_path: str, *, kind: str) -> Path:
         raise ImportSourceError(
             f"The {kind} must be below {root_resolved} (the import directory mounted into the container).")
     return path
-
-
-def build_chapters_json(chapters: list) -> bytes:
-    """Podcasting 2.0 chapters file, as the old Podcaster generated it (titles max. 45 characters)."""
-    data = {"version": "1.2.0", "chapters": [
-        {"startTime": c.get("start_time", 0), "title": t if len(t) <= 45 else t[:44].rstrip() + "…"}
-        for c in chapters if isinstance(c, dict) and isinstance(t := c.get("title"), str) and t
-    ]}
-    return json.dumps(data).encode()
 
 
 def _load_config(path: Path) -> dict:

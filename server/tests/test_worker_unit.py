@@ -70,7 +70,7 @@ def test_client_sends_token_and_parses_hello():
         seen["body"] = json.loads(request.content)
         return httpx.Response(200, json=HELLO_BODY)
 
-    reply = make_client(handler).hello(hello_request())
+    reply = make_client(handler).hello(hello_request({}))   # explicit: do not depend on the tools installed here
     assert seen["auth"] == "Bearer pnw_secret-token" and seen["url"] == "https://pod.example.org/api/worker/hello"
     assert seen["ua"].startswith("podcaster-ng-worker/") and "worker_version" in seen["body"]
     assert "ytdlp_version" not in seen["body"]  # unset tools are not sent

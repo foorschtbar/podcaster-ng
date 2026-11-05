@@ -3,12 +3,18 @@
 import httpx
 import pydantic
 
+from pathlib import Path
+from typing import Callable
+
 from pn_shared.api import (ClaimRequest, ClaimResponse, FailRequest, FailResponse, HeartbeatRequest, HeartbeatResponse,
-                           HelloRequest, HelloResponse, PingResponse, ScanResult, ScanResultResponse)
+                           HelloRequest, HelloResponse, PingResponse, ScanResult, ScanResultResponse,
+                           CompleteRequest, CompleteResponse, FileEntry, UploadResponse)
 
 from . import __version__
 
 TIMEOUT = httpx.Timeout(connect=10.0, read=20.0, write=20.0, pool=10.0)
+UPLOAD_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=600.0, pool=10.0)  # the server hashes and checks before it answers
+CHUNK = 1 << 20
 
 
 class AuthError(Exception):
@@ -23,8 +29,23 @@ class TaskLost(Exception):
     """The server says this task is not (or no longer) ours: the lease expired and it was handed on."""
 
 
+class UploadRejected(Exception):
+    """The server refused an upload or the package (wrong hash, bad file, package incomplete)."""
+
+    def __init__(self, status: int, detail: str):
+        super().__init__(f"the server rejected it ({status}): {detail}")
+        self.status, self.detail = status, detail
+
+
 class ServerError(Exception):
     """Server unreachable or answering with an unexpected status."""
+
+
+def _detail(response: httpx.Response) -> str:
+    try:
+        return str(response.json().get("detail", ""))[:300]
+    except (ValueError, AttributeError):
+        return response.text[:300]
 
 
 class ApiClient:
@@ -43,12 +64,9 @@ class ApiClient:
         except httpx.HTTPError as exc:  # connection refused, timeout, TLS, ...
             raise ServerError(f"{type(exc).__name__}: {exc}") from None
         if response.status_code in (401, 403):
-            detail = ""
-            try:
-                detail = str(response.json().get("detail", ""))
-            except ValueError:
-                pass
-            raise AuthError(response.status_code, detail)
+            raise AuthError(response.status_code, _detail(response))
+        if response.status_code in (400, 413, 422) and path.endswith(("/upload", "/complete")):
+            raise UploadRejected(response.status_code, _detail(response))
         if response.status_code in (404, 409) and "/tasks/" in path:
             raise TaskLost(f"task not available to this worker ({response.status_code})")
         if response.status_code != 200:
@@ -83,3 +101,26 @@ class ApiClient:
 
     def fail(self, task_id: int, request: FailRequest) -> FailResponse:
         return self._parse(FailResponse, self._call("POST", f"/tasks/{task_id}/fail", json=request.model_dump(exclude_none=True)))
+
+    def upload(self, task_id: int, role: str, path: Path, sha256: str, ext: str = "",
+               on_progress: Callable[[int, int], None] | None = None) -> UploadResponse:
+        """Stream one file of the package as the raw request body."""
+        size = path.stat().st_size
+
+        def chunks():
+            sent = 0
+            with path.open("rb") as fh:
+                while chunk := fh.read(CHUNK):
+                    sent += len(chunk)
+                    if on_progress:
+                        on_progress(sent, size)
+                    yield chunk
+
+        return self._parse(UploadResponse, self._call(
+            "POST", f"/tasks/{task_id}/upload", params={"role": role, "size": size, "sha256": sha256, "ext": ext},
+            content=chunks(), headers={"Content-Type": "application/octet-stream", "Content-Length": str(size)},
+            timeout=UPLOAD_TIMEOUT))
+
+    def complete(self, task_id: int, files: list[FileEntry]) -> CompleteResponse:
+        return self._parse(CompleteResponse, self._call(
+            "POST", f"/tasks/{task_id}/complete", json=CompleteRequest(files=files).model_dump(), timeout=UPLOAD_TIMEOUT))

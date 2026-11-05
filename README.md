@@ -2,7 +2,7 @@
 
 Turns YouTube playlists into podcast feeds. The **server** coordinates and serves (feeds, files, queue, admin UI, SQLite); replaceable **workers** (yt-dlp, ffmpeg, deno) run on any network and upload finished episodes.
 
-**Status:** server skeleton plus a mobile-first admin shell behind a login with podcast and settings management, public feeds and files compatible with the old Podcaster, an import assistant, and hit statistics with a dashboard, worker registration, and a work queue: the server schedules scans of the playlists, workers claim and run them, and the results become download tasks. Downloads are not executed yet.
+**Status:** server skeleton plus a mobile-first admin shell behind a login with podcast and settings management, public feeds and files compatible with the old Podcaster, an import assistant, and hit statistics with a dashboard, worker registration, and a work queue: the server schedules scans of the playlists, workers claim and run them, and the results become download tasks. Workers download the videos, verify and upload them, and the episodes appear in the feed.
 
 ## Layout
 
@@ -12,7 +12,8 @@ Turns YouTube playlists into podcast feeds. The **server** coordinates and serve
 | `shared/` | `pn_shared`: worker API schemas (Pydantic) and logging, used by server and worker |
 | `worker/` | `pn_worker`: the worker (hello, ping, backoff) and its Dockerfile |
 | `server/` | Python package `app` (FastAPI), `migrations/`, tests, Dockerfile |
-| `compose.yml` | server service, data bind mount `./data` |
+| `compose.example.yml` | template for `compose.yml`: server, optional worker, data bind mount `./data` |
+| `compose.yml` | your private copy (git-ignored): domain, resolver, mounts |
 | `.env.example` | supported environment variables |
 
 The server image contains no yt-dlp, ffmpeg or deno.
@@ -20,13 +21,14 @@ The server image contains no yt-dlp, ffmpeg or deno.
 ## Run
 
 ```bash
-cp .env.example .env     # optional, all values may stay empty
+cp compose.example.yml compose.yml   # private copy, git-ignored: adapt domain, proxy, mounts
+cp .env.example .env     # set at least ADMIN_USER and ADMIN_PASSWORD
 mkdir -p data            # create as your own user, the container runs as UID 1000
 docker compose up -d --build
 docker compose ps        # STATUS should become "healthy"
 ```
 
-No port is published. Reach it through a reverse proxy (see the commented Traefik labels in `compose.yml`) or check from inside:
+No port is published. Reach it through a reverse proxy (see the commented Traefik block in `compose.example.yml`) or check from inside:
 
 ```bash
 docker exec podcaster-ng-server python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8080/healthz').read())"
@@ -85,6 +87,8 @@ Header `Authorization: Bearer <token>`, base path `/api/worker`, separate from t
 | `POST /claim` | ask for work (`{"types": ["scan"]}`); the reply holds a task or `retry_after_seconds` |
 | `POST /tasks/{id}/heartbeat` | extend the lease of the claimed task (`409` if it is not yours any more) |
 | `POST /tasks/{id}/scan-result` | report the videos of a playlist scan |
+| `POST /tasks/{id}/upload` | upload one file of a package as the raw body (`role`, `size`, `sha256`, `ext` as query parameters): `audio`, `info` (info.json), `thumb`, `square`, `chapters` |
+| `POST /tasks/{id}/complete` | send the manifest (role, size, SHA-256 per file); the server verifies and publishes the package |
 | `POST /tasks/{id}/fail` | report an error class and text (`bot_check`, `not_yet_available`, `private`, `removed`, `network`, `timeout`, `internal`, `incomplete`) |
 
 `401` for a missing, unknown or revoked token, `403` for a deactivated worker, `429` when rate limited: invalid tokens are limited per client address (10 failures in 5 minutes lock that address out for 5 minutes, but never a valid token), valid workers to 120 calls per minute. Every authenticated call updates *last seen*. Tokens are never logged or stored in clear text.
@@ -109,6 +113,20 @@ pending --claim--> claimed --scan-result--> done
 
 The worker runs scans with the yt-dlp command line (metadata only, `--flat-playlist`) as a separate process with a hard time limit (`SCAN_TIMEOUT`, default 300 s), so a hung scan is killed. `YTDLP_PROXY` sets a proxy for yt-dlp only; the calls to the server never use proxy environment variables. `POLL_INTERVAL` overrides the idle wait between claims. A worker without yt-dlp only pings.
 
+## Downloads and packages
+
+A `download` task turns one video into an episode:
+
+1. **Worker:** yt-dlp (`-f m4a/bestaudio/best -x --audio-format m4a`, thumbnail and `info.json`, as in the old project; JS challenges are solved with deno), then verification: `info.json` present with the right video id, ffprobe can read the m4a, the audio is AAC, and its duration is within 10 s / 3 % of the metadata. Then the square artwork (1400 px, blurred background with the original centred) and the chapters file (Podcasting 2.0, titles at most 45 characters). A hard time limit (`DOWNLOAD_TIMEOUT`, default 3600 s) kills yt-dlp; `YTDLP_COOKIES` and `YTDLP_PROXY` are optional.
+2. **Upload:** every file is streamed to `data/staging/<task>-<attempt>/` with its SHA-256; the server hashes while receiving and refuses a wrong hash, a wrong size, a file that is not what its role says, or one above the upload limit (Settings → Uploads).
+3. **Complete:** the server recomputes the hashes, checks that `audio` and `info.json` exist and that the `info.json` belongs to the video, and only then moves the files into `data/media/<podcast>/` and creates the episode row, in this order, so a feed never shows a half-published item. If a step fails, the files go back to staging and nothing is visible. A package that does not verify is recorded as an `incomplete` attempt (retried with backoff).
+4. **Names** are assigned by the server from the title, exactly as yt-dlp names files (`%(title)s`, including the full-width look-alikes for `: ? " * < > | /`), so new and imported episodes look alike; this is tested against yt-dlp and the real imported file names. If the name is taken, ` [video id]` is added; names never start with a dot.
+5. **Pacing:** one task per worker at a time, the pause between downloads (server minimum, then a random pause between the configured min and max on the worker) and downloads per hour. A premiere is rescheduled with `not_before` (from the scan, or from yt-dlp's "will begin in N hours") and is not counted as a failure.
+
+Stale staging directories (finished or abandoned attempts, or untouched for 12 hours) are removed when the server starts and every night. The worker image contains yt-dlp, deno, ffmpeg and Pillow; the server image still contains none of them.
+
+Behind a reverse proxy, the maximum request body size has to be at least the upload limit (default 1024 MB), and its timeouts have to allow a slow upload.
+
 ## Statistics and dashboard
 
 Anonymous daily counters in `hits_daily` (day, podcast, episode, kind, app group, count, bytes). No IP addresses and no raw user agents are stored; the user agent is only mapped to an app group (table `RULES` in `server/app/app_groups.py`: Apple Podcasts, Overcast, Pocket Casts, Spotify, …, Bots, Browsers, Other).
@@ -126,7 +144,7 @@ The dashboard (`/dashboard`) shows downloads, feed requests and transferred data
 
 ## Import from the old Podcaster
 
-Mount the old project read-only (uncomment the example in `compose.yml`), restart, then Settings → Import assistant. It shows a dry run first (podcasts, episodes, sizes, problems) and imports only after confirmation. It reads `config.yml` and the downloads directory (`jobs`, `baseurl`, `interval`, `*.info.json`, `*.m4a`, thumbnails, chapters, `archive.txt`; the cookie file is never read), copies the files with unchanged names into `data/media/` and records videos from `archive.txt` without files as known (`deleted`) so they are not downloaded again. The old project is never modified. The import is only possible while there are no episodes; the database is written in one transaction after all files are in place, so a failed run can simply be repeated.
+Mount the old project read-only (uncomment the two mounts in your `compose.yml`, see `compose.example.yml`), restart, then Settings → Import assistant. It shows a dry run first (podcasts, episodes, sizes, problems) and imports only after confirmation. It reads `config.yml` and the downloads directory (`jobs`, `baseurl`, `interval`, `*.info.json`, `*.m4a`, thumbnails, chapters, `archive.txt`; the cookie file is never read), copies the files with unchanged names into `data/media/` and records videos from `archive.txt` without files as known (`deleted`) so they are not downloaded again. The old project is never modified. The import is only possible while there are no episodes; the database is written in one transaction after all files are in place, so a failed run can simply be repeated.
 
 Compare the feeds of both instances (host names are ignored):
 

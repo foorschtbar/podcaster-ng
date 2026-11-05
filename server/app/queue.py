@@ -113,7 +113,7 @@ def _expire(conn: sqlite3.Connection, now: datetime) -> int:
     stamp = ts(now)
     rows = conn.execute("SELECT id FROM tasks WHERE state = 'claimed' AND lease_until < ?", (stamp,)).fetchall()
     for r in rows:
-        conn.execute("UPDATE tasks SET state = 'pending', claimed_by = NULL, lease_until = NULL, "
+        conn.execute("UPDATE tasks SET state = 'pending', claimed_by = NULL, lease_until = NULL, progress = '', "
                      "failures = failures + 1, updated_at = ? WHERE id = ?", (stamp, r["id"]))
         conn.execute("UPDATE attempts SET ended_at = ?, result = 'lease_expired', error_class = 'timeout', "
                      "error_text = 'The lease expired: no heartbeat from the worker' "
@@ -217,7 +217,7 @@ def claim(conn: sqlite3.Connection, worker: dict, types: list[str], defaults: di
                     wait = delay if wait is None else min(wait, delay)
                     continue
             lease_until = ts(now + timedelta(seconds=lease_seconds))
-            cur = conn.execute("UPDATE tasks SET state = 'claimed', claimed_by = ?, lease_until = ?, updated_at = ? "
+            cur = conn.execute("UPDATE tasks SET state = 'claimed', claimed_by = ?, lease_until = ?, progress = '', updated_at = ? "
                                "WHERE id = ? AND state = 'pending'", (worker["id"], lease_until, ts(now), c["id"]))
             if cur.rowcount != 1:
                 continue
@@ -239,14 +239,62 @@ def _owned(conn: sqlite3.Connection, task_id: int, worker_id: int) -> sqlite3.Ro
 
 
 def heartbeat(conn: sqlite3.Connection, task_id: int, worker_id: int, lease_seconds: int,
-              now: datetime | None = None) -> str:
-    """Extend the lease. Raises NotOwner if the task was taken away (lease expired and handed on)."""
+              now: datetime | None = None, progress: str | None = None) -> str:
+    """Extend the lease. Raises NotOwner if the task was taken away (lease expired and handed on).
+
+    ``progress`` (what the worker is doing) replaces the stored text when given.
+    """
     now = now or utcnow()
     with transaction(conn):
         _owned(conn, task_id, worker_id)
         lease_until = ts(now + timedelta(seconds=lease_seconds))
-        conn.execute("UPDATE tasks SET lease_until = ?, updated_at = ? WHERE id = ?", (lease_until, ts(now), task_id))
+        if progress is None:
+            conn.execute("UPDATE tasks SET lease_until = ?, updated_at = ? WHERE id = ?", (lease_until, ts(now), task_id))
+        else:
+            conn.execute("UPDATE tasks SET lease_until = ?, progress = ?, updated_at = ? WHERE id = ?",
+                         (lease_until, clean(progress, 200), ts(now), task_id))
         return lease_until
+
+
+def owned_attempt(conn: sqlite3.Connection, task_id: int, worker_id: int) -> tuple[sqlite3.Row, int]:
+    """The claimed task and the id of its running attempt, or NotOwner."""
+    task = _owned(conn, task_id, worker_id)
+    row = conn.execute("SELECT id FROM attempts WHERE task_id = ? AND worker_id = ? AND result IS NULL ORDER BY id DESC LIMIT 1",
+                       (task_id, worker_id)).fetchone()
+    if row is None:
+        raise NotOwner(task_id)
+    return task, row["id"]
+
+
+def complete_download(conn: sqlite3.Connection, task_id: int, worker_id: int, fields: dict,
+                      now: datetime | None = None) -> None:
+    """Publish a verified package: create (or revive) the episode row and mark the task done, in one transaction.
+
+    The files are already in the media directory; the feed only lists rows, so nothing shows up before this.
+    """
+    now = now or utcnow()
+    with transaction(conn):
+        task = _owned(conn, task_id, worker_id)
+        if task["type"] != "download":
+            raise BadState("not a download task")
+        existing = conn.execute("SELECT state FROM episodes WHERE podcast_id = ? AND video_id = ?",
+                                (task["podcast_id"], task["video_id"])).fetchone()
+        if existing and existing["state"] == "available":
+            raise BadState("this video already is an episode")
+        cols = ["title", "description", "author", "audio_file", "thumb_file", "square_file", "chapters_file", "info_file",
+                "size_bytes", "duration_s", "published_at"]
+        if existing:  # known from an import or an earlier deletion: bring it back
+            sets = ", ".join(f"{c} = ?" for c in cols)
+            conn.execute(f"UPDATE episodes SET {sets}, state = 'available', updated_at = ? WHERE podcast_id = ? AND video_id = ?",
+                         [*(fields[c] for c in cols), ts(now), task["podcast_id"], task["video_id"]])
+        else:
+            conn.execute(f"INSERT INTO episodes (podcast_id, video_id, {', '.join(cols)}, state, created_at, updated_at) "
+                         f"VALUES (?, ?, {', '.join('?' * len(cols))}, 'available', ?, ?)",
+                         [task["podcast_id"], task["video_id"], *(fields[c] for c in cols), ts(now), ts(now)])
+        conn.execute("UPDATE tasks SET state = 'done', claimed_by = NULL, lease_until = NULL, progress = '', finished_at = ?, "
+                     "updated_at = ? WHERE id = ?", (ts(now), ts(now), task_id))
+        conn.execute("UPDATE attempts SET ended_at = ?, result = 'ok', note = ? WHERE task_id = ? AND result IS NULL",
+                     (ts(now), f"published {fields['audio_file']} ({fields['size_bytes']} bytes)", task_id))
 
 
 # --- results ------------------------------------------------------------------------------------------
@@ -288,7 +336,7 @@ def complete_scan(conn: sqlite3.Connection, task_id: int, worker_id: int, videos
             created += 1
         skipped = max(0, len(videos) - depth)
         note = f"{len(videos)} videos reported, {created} new, {known} known, {skipped} beyond the scan depth"
-        conn.execute("UPDATE tasks SET state = 'done', claimed_by = NULL, lease_until = NULL, finished_at = ?, "
+        conn.execute("UPDATE tasks SET state = 'done', claimed_by = NULL, lease_until = NULL, progress = '', finished_at = ?, "
                      "updated_at = ? WHERE id = ?", (ts(now), ts(now), task_id))
         conn.execute("UPDATE attempts SET ended_at = ?, result = 'ok', note = ? WHERE task_id = ? AND result IS NULL",
                      (ts(now), note, task_id))
@@ -328,7 +376,7 @@ def fail(conn: sqlite3.Connection, task_id: int, worker_id: int, error_class: st
             not_before = ts(now + timedelta(seconds=wait))
             state, result = "pending", "failed"
         finished = ts(now) if state == "closed" else None
-        conn.execute("UPDATE tasks SET state = ?, claimed_by = NULL, lease_until = NULL, not_before = ?, failures = ?, "
+        conn.execute("UPDATE tasks SET state = ?, claimed_by = NULL, lease_until = NULL, progress = '', not_before = ?, failures = ?, "
                      "updated_at = ?, finished_at = ? WHERE id = ?", (state, not_before, failures, ts(now), finished, task_id))
         conn.execute("UPDATE attempts SET ended_at = ?, result = ?, error_class = ?, error_text = ? "
                      "WHERE task_id = ? AND result IS NULL", (ts(now), result, error_class, text, task_id))
@@ -355,7 +403,7 @@ def release(conn: sqlite3.Connection, task_id: int, now: datetime | None = None)
     with transaction(conn):
         if _get(conn, task_id)["state"] != "claimed":
             raise BadState("only a claimed task can be released")
-        conn.execute("UPDATE tasks SET state = 'pending', claimed_by = NULL, lease_until = NULL, updated_at = ? WHERE id = ?",
+        conn.execute("UPDATE tasks SET state = 'pending', claimed_by = NULL, lease_until = NULL, progress = '', updated_at = ? WHERE id = ?",
                      (ts(now), task_id))
         _close_open_attempt(conn, task_id, now, "released manually")
 
@@ -380,7 +428,7 @@ def close(conn: sqlite3.Connection, task_id: int, now: datetime | None = None) -
     with transaction(conn):
         if _get(conn, task_id)["state"] not in OPEN_STATES:
             raise BadState("only an open task can be closed")
-        conn.execute("UPDATE tasks SET state = 'closed', claimed_by = NULL, lease_until = NULL, finished_at = ?, "
+        conn.execute("UPDATE tasks SET state = 'closed', claimed_by = NULL, lease_until = NULL, progress = '', finished_at = ?, "
                      "updated_at = ? WHERE id = ?", (ts(now), ts(now), task_id))
         _close_open_attempt(conn, task_id, now, "closed manually")
 

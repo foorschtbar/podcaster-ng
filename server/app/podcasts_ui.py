@@ -31,9 +31,10 @@ def _form_page(request, session, *, creating: bool, values: dict, errors: dict, 
                status_code: int = 200):
     with db(request) as conn:
         defaults = settings.get_all(conn, env_defaults(request))
+        recent = episodes.recent(conn, podcast_id, 10) if podcast_id else []
     return render(request, "podcast_form.html", session, status_code=status_code, active="podcasts",
                   title="New podcast" if creating else "Edit podcast", creating=creating, v=values,
-                  errors=errors, defaults=defaults, podcast_id=podcast_id)
+                  errors=errors, defaults=defaults, podcast_id=podcast_id, recent=recent)
 
 
 @protected.get("/podcasts", response_class=HTMLResponse, include_in_schema=False)

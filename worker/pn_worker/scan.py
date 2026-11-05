@@ -6,27 +6,19 @@ yt-dlp runs as a separate process so that the hard time limit really kills it, w
 import json
 import logging
 import shutil
-import subprocess
 import threading
-import time
 
 from pn_shared.api import VideoInfo
 
 from .classify import classify
+from .process import Failure, Lost, run_process
 
 log = logging.getLogger("pn_worker.scan")
 SKIPPED_TITLES = {"[private video]", "[deleted video]"}
-POLL = 0.5
 
 
-class ScanFailure(Exception):
-    def __init__(self, error_class: str, message: str, retry_after: int | None = None):
-        super().__init__(message)
-        self.error_class, self.message, self.retry_after = error_class, message, retry_after
-
-
-class ScanLost(Exception):
-    """The lease was lost while scanning; the result would be discarded anyway."""
+ScanFailure = Failure   # kept as the scan's name for the same classes
+ScanLost = Lost
 
 
 def build_command(binary: str, url: str, depth: int, proxy: str | None) -> list[str]:
@@ -35,25 +27,6 @@ def build_command(binary: str, url: str, depth: int, proxy: str | None) -> list[
     if proxy:
         cmd += ["--proxy", proxy]
     return [*cmd, "--", url]
-
-
-def _run(cmd: list[str], timeout: float, lost: threading.Event) -> tuple[int, str, str]:
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, stdin=subprocess.DEVNULL)
-    deadline = time.monotonic() + timeout
-    try:
-        while True:
-            try:
-                out, err = proc.communicate(timeout=POLL)
-                return proc.returncode, out, err
-            except subprocess.TimeoutExpired:
-                if lost.is_set():
-                    raise ScanLost() from None
-                if time.monotonic() > deadline:
-                    raise ScanFailure("timeout", f"The scan took longer than {timeout:.0f} s and was stopped") from None
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.communicate()
 
 
 def parse_entries(output: str) -> list[VideoInfo]:
@@ -86,7 +59,7 @@ def scan_playlist(url: str, depth: int, *, timeout: float, proxy: str | None, lo
     path = shutil.which(binary)
     if not path:
         raise ScanFailure("internal", f"{binary} is not installed on this worker")
-    code, out, err = _run(build_command(path, url, depth, proxy), timeout, lost)
+    code, out, err = run_process(build_command(path, url, depth, proxy), timeout, lost, what="The scan")
     if code != 0:
         tail = "\n".join(err.strip().splitlines()[-6:])[-1500:]
         raise ScanFailure(classify(err), tail or f"yt-dlp exited with status {code}")

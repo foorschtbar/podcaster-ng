@@ -1,16 +1,19 @@
 """Worker API v1 under /api/worker (bearer token). Separate from the public and admin routes."""
 
+import hashlib
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 from pn_shared import API_VERSION
 from pn_shared.api import (ClaimRequest, ClaimResponse, FailRequest, FailResponse, HeartbeatRequest, HeartbeatResponse,
                            HelloRequest, HelloResponse, Pacing, PingResponse, ScanResult, ScanResultResponse, TaskInfo,
-                           TaskPodcast, WorkerInfo)
+                           TaskPodcast, WorkerInfo, CompleteRequest, CompleteResponse, PackageRole, Sha256, UploadResponse)
 
-from . import queue, settings, workers
+from . import packages, queue, settings, workers
 from .db import connect
 from .web import client_of
 
@@ -137,7 +140,7 @@ def _with_conn(request: Request, call):
 def heartbeat(task_id: int, body: HeartbeatRequest, request: Request, worker: dict = Depends(authenticate)):
     def run(conn):
         lease = settings.get(conn, "lease_seconds")
-        return HeartbeatResponse(lease_until=queue.heartbeat(conn, task_id, worker["id"], lease))
+        return HeartbeatResponse(lease_until=queue.heartbeat(conn, task_id, worker["id"], lease, progress=body.progress))
     return _with_conn(request, run)
 
 
@@ -156,3 +159,105 @@ def fail(task_id: int, body: FailRequest, request: Request, worker: dict = Depen
         return FailResponse(state=state, not_before=not_before)
     log.info("Worker %r reports %s for task %d", worker["name"], body.error_class, task_id)
     return _with_conn(request, run)
+
+
+# --- package upload and complete ------------------------------------------------------------------------------
+
+def _prepare_upload(request: Request, task_id: int, worker_id: int, role: str) -> tuple[Path, int]:
+    """Ownership check plus staging directory and size limit for the role."""
+    config = request.app.state.config
+    conn = connect(config.db_path)
+    try:
+        try:
+            task, attempt_id = queue.owned_attempt(conn, task_id, worker_id)
+        except queue.QueueError as exc:
+            raise _queue_error(exc) from None
+        if task["type"] != "download":
+            raise HTTPException(409, "Only download tasks take uploads")
+        limit = packages.size_limit(role, settings.get(conn, "upload_limit_mb"))
+    finally:
+        conn.close()
+    directory = packages.staging_dir_for(config.staging_dir, task_id, attempt_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory, limit
+
+
+@router.post("/tasks/{task_id}/upload", response_model=UploadResponse)
+async def upload(task_id: int, request: Request, role: PackageRole, size: int = Query(ge=1), sha256: Sha256 = Query(),
+                 ext: str = Query(default="", max_length=5, pattern=r"^[A-Za-z0-9]*$"), worker: dict = Depends(authenticate)):
+    """Receive one file of a package as the raw request body (streamed to disk, hashed on the fly)."""
+    directory, limit = await run_in_threadpool(_prepare_upload, request, task_id, worker["id"], role)
+    if size > limit:
+        raise HTTPException(413, f"The {role} file is larger than the allowed {limit >> 20} MB")
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) != size:
+        raise HTTPException(400, "Content-Length does not match the declared size")
+    if role == "thumb" and ext.lower() not in packages.THUMB_EXTS:
+        raise HTTPException(422, "The thumbnail needs an extension: webp, jpg, jpeg or png")
+    part = directory / f"{role}.part"
+    digest, total = hashlib.sha256(), 0
+    try:
+        with part.open("wb") as out:
+            async for chunk in request.stream():
+                total += len(chunk)
+                if total > size:
+                    raise HTTPException(400, "More data than declared")
+                digest.update(chunk)
+                await run_in_threadpool(out.write, chunk)
+        if total != size:
+            raise HTTPException(422, f"Received {total} bytes, declared {size}")
+        if digest.hexdigest() != sha256:
+            raise HTTPException(422, "The SHA-256 of the received file does not match")
+        try:
+            await run_in_threadpool(packages.sniff, role, part, ext)
+        except packages.PackageError as exc:
+            raise HTTPException(422, str(exc)) from None
+        staged = packages.Staged(role, directory / f"{role}.bin", total, sha256, ext.lower())
+        await run_in_threadpool(lambda: (part.replace(staged.path), packages.store_meta(directory, staged)))
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    return UploadResponse(role=role, size=total, sha256=sha256)
+
+
+def _complete(request: Request, task_id: int, worker: dict, body: CompleteRequest) -> CompleteResponse:
+    config = request.app.state.config
+    conn = connect(config.db_path)
+    try:
+        try:
+            task, attempt_id = queue.owned_attempt(conn, task_id, worker["id"])
+        except queue.QueueError as exc:
+            raise _queue_error(exc) from None
+        if task["type"] != "download":
+            raise HTTPException(409, "Only download tasks can be completed")
+        directory = packages.staging_dir_for(config.staging_dir, task_id, attempt_id)
+        manifest = {f.role: (f.size, f.sha256) for f in body.files}
+        try:
+            files, info = packages.verify_package(directory, manifest, task["video_id"])
+        except packages.PackageError as exc:
+            # A broken package never becomes an episode: the attempt is recorded as "incomplete" and retried.
+            queue.fail(conn, task_id, worker["id"], "incomplete", f"Package rejected: {exc}")
+            packages.remove(directory)
+            log.warning("Package of task %d rejected: %s", task_id, exc)
+            raise HTTPException(422, f"Package rejected: {exc}") from None
+        target = config.media_dir / task["podcast_id"]
+        names = packages.plan_names(info["title"], task["video_id"], files, packages.taken_bases(conn, task["podcast_id"], target))
+        moved = packages.move_into_media(files, names, target)
+        try:
+            queue.complete_download(conn, task_id, worker["id"], packages.episode_fields(info, names, files))
+        except BaseException as exc:
+            packages.rollback_move(moved)                      # back to staging: the worker can call complete again
+            if isinstance(exc, queue.QueueError):
+                raise _queue_error(exc) from None
+            raise
+        packages.remove(directory)
+    finally:
+        conn.close()
+    log.info("Task %d: episode %r published by worker %r", task_id, names["audio"], worker["name"])
+    return CompleteResponse(video_id=task["video_id"], audio_file=names["audio"])
+
+
+@router.post("/tasks/{task_id}/complete", response_model=CompleteResponse)
+def complete(task_id: int, body: CompleteRequest, request: Request, worker: dict = Depends(authenticate)):
+    """Verify the staged package and publish it: files into the media directory, then the episode row."""
+    return _complete(request, task_id, worker, body)

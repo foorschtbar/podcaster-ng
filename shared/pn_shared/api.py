@@ -114,3 +114,31 @@ class FailRequest(BaseModel):
 class FailResponse(BaseModel):
     state: str
     not_before: str | None = None
+
+
+# --- packages: upload and complete ---------------------------------------------------------------------------
+
+PackageRole = Literal["audio", "info", "thumb", "square", "chapters"]
+Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+
+
+class UploadResponse(BaseModel):
+    role: PackageRole
+    size: int
+    sha256: Sha256
+
+
+class FileEntry(BaseModel):
+    role: PackageRole
+    size: int = Field(ge=1)
+    sha256: Sha256
+
+
+class CompleteRequest(BaseModel):
+    """What the worker believes it uploaded; the server checks it against what is in staging."""
+    files: list[FileEntry] = Field(min_length=1, max_length=5)
+
+
+class CompleteResponse(BaseModel):
+    video_id: str
+    audio_file: str

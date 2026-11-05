@@ -27,8 +27,13 @@ def backoff_delays(start: float, maximum: float, rng: random.Random | None = Non
 
 
 def supported_types(found: dict[str, str]) -> list[str]:
-    """Task types this worker can execute with the tools it has. Downloads arrive in a later step."""
-    return ["scan"] if "ytdlp" in found else []
+    """Task types this worker can execute with the tools it has (downloads need yt-dlp, ffmpeg and ffprobe)."""
+    types = []
+    if "ytdlp" in found:
+        types.append("scan")
+        if "ffmpeg" in found and "ffprobe" in found:
+            types.append("download")
+    return types
 
 
 def hello_request(found: dict[str, str] | None = None) -> HelloRequest:
@@ -81,6 +86,9 @@ def run(config: Config, stop: threading.Event, client: ApiClient | None = None, 
                 if answer.task:
                     idle = 0
                     run_task(client, answer.task, config)
+                    if answer.task.type == "download":   # a random pause between videos, as configured
+                        limits = answer.task.pacing
+                        wait(random.uniform(limits.pause_min_s, max(limits.pause_min_s, limits.pause_max_s)))
                 else:
                     wait(config.poll_interval or idle_delay(answer.retry_after_seconds, idle))
                     idle += 1

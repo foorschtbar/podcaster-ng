@@ -26,6 +26,10 @@ class Config:
         return self.data_dir / "media"
 
     @property
+    def staging_dir(self) -> Path:
+        return self.data_dir / "staging"
+
+    @property
     def backup_dir(self) -> Path:
         return self.data_dir / "backups"
 

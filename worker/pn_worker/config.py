@@ -21,6 +21,10 @@ class Config:
     scan_timeout: float = 300.0         # hard limit for one scan (the yt-dlp process is killed)
     ytdlp_proxy: str | None = None
     heartbeat_interval: float | None = None  # None: a third of the lease, at most 60 s
+    download_timeout: float = 3600.0    # hard limit for one download task (yt-dlp, ffmpeg, upload)
+    cookies_file: str | None = None     # optional yt-dlp cookies; never logged
+    work_dir: str = "/tmp/pn-work"
+    upload_retries: int = 3
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -38,5 +42,13 @@ class Config:
             poll = float(os.environ["POLL_INTERVAL"]) if os.environ.get("POLL_INTERVAL") else None
         except ValueError:
             raise ConfigError("POLL_INTERVAL must be a number of seconds") from None
-        return cls(server_url=server_url, token=token, poll_interval=poll, log_level=(os.environ.get("LOG_LEVEL") or "INFO").upper(),
+        try:
+            download_timeout = float(os.environ.get("DOWNLOAD_TIMEOUT") or 3600)
+        except ValueError:
+            raise ConfigError("DOWNLOAD_TIMEOUT must be a number of seconds") from None
+        cookies = (os.environ.get("YTDLP_COOKIES") or "").strip() or None
+        if cookies and not os.path.isfile(cookies):
+            raise ConfigError("YTDLP_COOKIES points to a file that does not exist")
+        return cls(server_url=server_url, token=token, poll_interval=poll, download_timeout=download_timeout,
+                   cookies_file=cookies, work_dir=os.environ.get("WORK_DIR") or "/tmp/pn-work", log_level=(os.environ.get("LOG_LEVEL") or "INFO").upper(),
                    scan_timeout=scan_timeout, ytdlp_proxy=(os.environ.get("YTDLP_PROXY") or "").strip() or None)

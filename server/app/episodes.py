@@ -43,3 +43,10 @@ def stats_by_podcast(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
         "COALESCE(SUM(CASE WHEN state = 'available' THEN size_bytes END), 0) AS size "
         "FROM episodes GROUP BY podcast_id").fetchall()
     return {r["podcast_id"]: r for r in rows}
+
+
+def recent(conn: sqlite3.Connection, podcast_id: str, limit: int = 10) -> list[sqlite3.Row]:
+    """The newest episodes with files (any state), for the podcast page."""
+    return conn.execute(
+        "SELECT * FROM episodes WHERE podcast_id = ? AND audio_file IS NOT NULL "
+        "ORDER BY COALESCE(published_at, substr(created_at, 1, 10)) DESC, created_at DESC LIMIT ?", (podcast_id, limit)).fetchall()

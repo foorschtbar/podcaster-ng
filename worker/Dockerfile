@@ -1,10 +1,13 @@
 # Build from the repository root:  docker build -f worker/Dockerfile -t podcaster-ng-worker .
-# Later steps add yt-dlp, ffmpeg and deno to this image; the server image never contains them.
+# Contains yt-dlp (with its JS challenge solver), deno, ffmpeg/ffprobe and Pillow. The server image never does.
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv
 COPY worker/requirements.txt .
@@ -13,7 +16,7 @@ RUN pip install -r requirements.txt
 COPY shared/pn_shared ./pn_shared
 COPY worker/pn_worker ./pn_worker
 
-RUN useradd -u 1000 -M -s /usr/sbin/nologin worker
+RUN useradd -u 1000 -m -s /usr/sbin/nologin worker && mkdir /tmp/pn-work && chown worker /tmp/pn-work
 USER worker
 
 # The worker touches this file on every loop iteration, also while the server is down (backoff <= 60 s).

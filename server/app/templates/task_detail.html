@@ -12,6 +12,7 @@
       <dt>Created</dt><dd>{{ task.created_at }} ({{ task.created_at | until }})</dd>
       {% if task.not_before %}<dt>Not before</dt><dd>{{ task.not_before }} ({{ task.not_before | until }})</dd>{% endif %}
       {% if task.worker_name %}<dt>Claimed by</dt><dd>{{ task.worker_name }}{% if task.lease_until %}, lease until {{ task.lease_until }} ({{ task.lease_until | until }}){% endif %}</dd>{% endif %}
+      {% if task.progress %}<dt>Progress</dt><dd>{{ task.progress }}</dd>{% endif %}
       <dt>Failed attempts</dt><dd>{{ task.failures }}</dd>
       {% if task.finished_at %}<dt>Finished</dt><dd>{{ task.finished_at }}</dd>{% endif %}
     </dl>
