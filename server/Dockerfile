@@ -19,6 +19,8 @@ ARG UID=1000
 ARG GID=1000
 RUN groupadd -g ${GID} podcaster && useradd -u ${UID} -g ${GID} -M -s /usr/sbin/nologin podcaster \
     && mkdir /data && chown podcaster:podcaster /data
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
 USER podcaster
 VOLUME /data
 EXPOSE 8080

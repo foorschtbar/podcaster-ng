@@ -26,6 +26,9 @@ services:
     volumes:
       - worker-work:/work
       # - ./cookies.txt:/run/cookies.txt:ro
+    # Watchtower (if it runs on this machine) pulls a new image and restarts the worker by itself.
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true

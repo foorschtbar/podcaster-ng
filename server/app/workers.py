@@ -5,7 +5,7 @@ import json
 import re
 import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from .validate import parse_int
 
@@ -153,3 +153,23 @@ def tools_of(row: sqlite3.Row) -> dict[str, str]:
         return dict(json.loads(row["tools"]))
     except (ValueError, TypeError):
         return {}
+
+
+YTDLP_OLD_DAYS = 60
+
+
+def version_differs(worker_version: str, server_version: str) -> bool:
+    """True if the worker runs another build than the server. Unstamped builds ("dev") cannot be compared."""
+    return bool(worker_version) and "dev" not in (worker_version, server_version) and worker_version != server_version
+
+
+def ytdlp_age_days(tools: dict[str, str], today: date | None = None) -> int | None:
+    """Age of the worker's yt-dlp in days (its version is a date like 2026.10.26), or None if unknown."""
+    match = re.match(r"^(\d{4})\.(\d{2})\.(\d{2})", tools.get("yt-dlp", ""))
+    if not match:
+        return None
+    try:
+        released = date(*(int(g) for g in match.groups()))
+    except ValueError:
+        return None
+    return ((today or datetime.now(timezone.utc).date()) - released).days

@@ -247,6 +247,10 @@ docker compose ps               # wait for "healthy"
 
 To go back, check out the previous version, rebuild and restore the database copy from `data/backups/` made before the migration (the server refuses a database that is newer than its code).
 
+### Versions
+
+The build stamps its version into the image (`APP_VERSION`, from `git describe --tags --always --abbrev=7`: a tag such as `v1.2.0`, or the commit). The pipeline does this for both images; for a local build run `APP_VERSION=$(git describe --tags --always --abbrev=7) docker compose build`, otherwise the version reads `dev`. Workers report it when they connect and the Workers page shows it: a worker whose build differs from the server's is marked *version differs*, and one whose yt-dlp is older than 60 days is marked too. Unstamped (`dev`) builds are not compared. A worker is updated on its own machine (`pull` and `up -d`, or Watchtower with the label in `compose.worker.example.yml`); the server cannot update it remotely, by design.
+
 ### Keeping yt-dlp current
 
 yt-dlp ages quickly. The worker image pins its versions in `worker/requirements.txt`; the version in use is shown per worker under Workers. To update: change the `yt-dlp` pin there (and `deno` if needed), then on every worker host `docker compose build --pull worker && docker compose up -d worker` (home worker: `docker compose -f compose.worker.yml pull && docker compose -f compose.worker.yml up -d`, after the new image was built by the pipeline). Do it when downloads start failing with `internal` errors, or monthly.

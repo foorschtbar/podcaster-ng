@@ -216,3 +216,54 @@ def test_token_page_offers_copy_buttons_and_selectable_fields(c):
 
 def token_of_html(html):
     return re.search(r'class="token" value="([^"]+)"', html).group(1)
+
+
+# --- versions ---------------------------------------------------------------------------------------------------
+
+def test_version_comparison_ignores_unstamped_builds():
+    from app import workers
+    assert workers.version_differs("v1.2.0-3-gabc1234", "v1.2.0-5-gdef5678")
+    assert not workers.version_differs("v1.2.0", "v1.2.0")
+    assert not workers.version_differs("dev", "v1.2.0") and not workers.version_differs("v1.2.0", "dev")
+    assert not workers.version_differs("", "v1.2.0")                                  # never connected
+
+
+def test_ytdlp_age_from_its_date_based_version():
+    from datetime import date
+    from app import workers
+    today = date(2026, 11, 5)
+    assert workers.ytdlp_age_days({"yt-dlp": "2026.10.26"}, today) == 10
+    assert workers.ytdlp_age_days({"yt-dlp": "2026.01.05"}, today) == 304
+    assert workers.ytdlp_age_days({"yt-dlp": "nightly"}, today) is None
+    assert workers.ytdlp_age_days({}, today) is None
+    assert workers.ytdlp_age_days({"yt-dlp": "2026.13.40"}, today) is None
+
+
+def test_the_build_stamps_the_version(monkeypatch):
+    import importlib
+    import app
+    monkeypatch.setenv("APP_VERSION", "v1.2.0-3-gabc1234")
+    assert importlib.reload(app).__version__ == "v1.2.0-3-gabc1234"
+    monkeypatch.setenv("APP_VERSION", "x" * 80)
+    assert len(importlib.reload(app).__version__) == 50
+    monkeypatch.delenv("APP_VERSION")
+    assert importlib.reload(app).__version__ == "dev"
+
+
+def test_the_workers_page_flags_a_different_build_and_an_old_yt_dlp(tmp_path, monkeypatch):
+    import json
+    from app import workers
+    import app.workers_ui as ui
+    from app.db import connect
+    monkeypatch.setattr(ui, "__version__", "v2.0.0")
+    with make_client(tmp_path) as c:
+        do_login(c)
+        conn = connect(c.app.state.config.db_path)
+        wid, _ = workers.create(conn, {"name": "old", "tier": 1, "active": 1, "pause_min_s": None, "pause_max_s": None, "downloads_per_hour": None})
+        workers.record_hello(conn, wid, "v1.0.0", ["scan"], {"yt-dlp": "2025.01.02"})
+        wid2, _ = workers.create(conn, {"name": "fresh", "tier": 1, "active": 1, "pause_min_s": None, "pause_max_s": None, "downloads_per_hour": None})
+        workers.record_hello(conn, wid2, "v2.0.0", ["scan"], {"yt-dlp": "2026.10.26"})
+        conn.close()
+        page = c.get("/workers").text
+    assert page.count("version differs") == 1 and "the server runs v2.0.0" in page
+    assert page.count("days old") == 1

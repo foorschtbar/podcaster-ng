@@ -3,7 +3,7 @@
 from fastapi import Depends, Path, Request
 from fastapi.responses import HTMLResponse
 
-from . import queue, settings, workers
+from . import __version__, queue, settings, workers
 from .web import Session, db, env_defaults, protected, redirect, render, require_session, templates
 
 FLASH = {"updated": "Worker saved.", "activated": "Worker activated.", "deactivated": "Worker deactivated.",
@@ -28,6 +28,11 @@ def ago(seconds) -> str:
 templates.env.filters["ago"] = ago
 
 
+def _old_ytdlp(tools: dict) -> int | None:
+    age = workers.ytdlp_age_days(tools)
+    return age if age is not None and age > workers.YTDLP_OLD_DAYS else None
+
+
 def worker_cards(conn, defaults: dict) -> list[dict]:
     """Workers with their computed status; also used by the dashboard."""
     online = defaults["worker_online_seconds"]
@@ -35,6 +40,8 @@ def worker_cards(conn, defaults: dict) -> list[dict]:
     for row in workers.list_all(conn):
         cards.append({"row": row, "status": workers.status(row, online), "seen": workers.seconds_since_seen(row),
                       "capabilities": workers.capabilities_of(row), "tools": workers.tools_of(row),
+                      "version_differs": workers.version_differs(row["version"], __version__),
+                      "ytdlp_age": _old_ytdlp(workers.tools_of(row)),
                       "blocked_until": row["download_blocked_until"] if (row["download_blocked_until"] or "") > queue.ts(queue.utcnow()) else None})
     return cards
 
@@ -72,7 +79,7 @@ def worker_list(request: Request, msg: str | None = None, session: Session = Dep
         defaults = settings.get_all(conn, env_defaults(request))
         cards = worker_cards(conn, defaults)
     return render(request, "workers.html", session, active="workers", title="Workers", cards=cards,
-                  online_seconds=defaults["worker_online_seconds"], flash=FLASH.get(msg or ""))
+                  online_seconds=defaults["worker_online_seconds"], flash=FLASH.get(msg or ""), server_version=__version__)
 
 
 @protected.get("/workers/new", response_class=HTMLResponse, include_in_schema=False)

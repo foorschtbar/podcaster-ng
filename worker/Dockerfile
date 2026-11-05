@@ -20,6 +20,8 @@ COPY worker/pn_worker ./pn_worker
 # HOME and DENO_DIR point to /tmp so the container also runs with a read-only root filesystem.
 RUN useradd -u 1000 -m -s /usr/sbin/nologin worker && mkdir /work /tmp/pn-work && chown worker /work /tmp/pn-work
 ENV HOME=/tmp DENO_DIR=/tmp/deno WORK_DIR=/work
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
 USER worker
 VOLUME /work
 

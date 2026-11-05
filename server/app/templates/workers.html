@@ -14,6 +14,8 @@
       <span class="badge {{ 'on' if c.status == 'online' else 'off' }}">{{ {'online': '● online', 'offline': 'offline', 'never': 'never connected', 'inactive': 'inactive'}[c.status] }}</span>
     </div>
     <div class="muted small">Tier {{ w.tier }} · last seen {{ c.seen | ago }}{% if w.version %} · version {{ w.version }}{% endif %}</div>
+    {% if c.version_differs %}<div class="small"><span class="badge warn">version differs</span> the server runs {{ server_version }}; update this worker's image (pull and restart)</div>{% endif %}
+    {% if c.ytdlp_age %}<div class="small"><span class="badge warn">yt-dlp is {{ c.ytdlp_age }} days old</span> downloads often fail with an old yt-dlp; update the worker's image</div>{% endif %}
     {% if c.blocked_until %}<div class="small"><span class="badge warn">downloads paused</span> after bot checks, until {{ c.blocked_until }} ({{ c.blocked_until | until }}); scans continue</div>{% endif %}
     {% if c.capabilities or c.tools %}
     <div class="muted small">
