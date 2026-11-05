@@ -48,6 +48,13 @@ def safe_media_path(media_dir: Path, podcast_id: str, name: str) -> Path | None:
     return path
 
 
+@router.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Browsers ask for this path by default, whatever the page declares."""
+    return FileResponse(Path(__file__).resolve().parent / "static" / "favicon.ico", media_type="image/x-icon",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 @router.api_route("/{podcast_id}.xml", methods=["GET", "HEAD"], include_in_schema=False)
 def feed(request: Request, podcast_id: str):
     if not podcasts.SLUG_RE.match(podcast_id):

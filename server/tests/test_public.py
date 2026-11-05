@@ -180,3 +180,18 @@ def test_public_routes_need_no_session_and_no_csrf(client):
 def test_post_to_public_routes_not_allowed(client):
     assert client.post("/abgt.xml").status_code in (404, 405)
     assert client.post("/files/abgt/Ep%201%20%23%3F.m4a").status_code in (404, 405)
+
+
+def test_favicon_and_logo_are_served_without_login(tmp_path):
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    from helpers import make_config
+    with TestClient(create_app(make_config(tmp_path)), base_url="https://testserver", follow_redirects=False) as c:
+        ico = c.get("/favicon.ico")
+        assert ico.status_code == 200 and ico.headers["content-type"] == "image/x-icon" and ico.content[:4] == b"\x00\x00\x01\x00"
+        for path, kind in (("/static/logo.svg", "image/svg+xml"), ("/static/favicon.svg", "image/svg+xml"),
+                           ("/static/apple-touch-icon.png", "image/png"), ("/static/icon-192.png", "image/png")):
+            r = c.get(path)
+            assert r.status_code == 200 and r.headers["content-type"].startswith(kind), path
+        page = c.get("/login").text
+        assert 'rel="icon" href="/static/favicon.svg"' in page and 'rel="apple-touch-icon"' in page and "/static/logo.svg" in page

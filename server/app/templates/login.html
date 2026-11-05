@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Log in – PodcasterNG{% endblock %}
 {% block public %}
-  <h1>PodcasterNG</h1>
+  <h1 class="brand"><img src="/static/logo.svg" alt="" width="40" height="40">PodcasterNG</h1>
   <form method="post" action="/login" class="card" autocomplete="on">
     <input type="hidden" name="login_token" value="{{ login_token }}">
     {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
