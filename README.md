@@ -2,7 +2,7 @@
 
 Turns YouTube playlists into podcast feeds. The **server** coordinates and serves (feeds, files, queue, admin UI, SQLite); replaceable **workers** (yt-dlp, ffmpeg, deno) run on any network and upload finished episodes.
 
-**Status:** server skeleton plus a mobile-first admin shell behind a login (placeholder pages only). No feeds or workers yet.
+**Status:** server skeleton plus a mobile-first admin shell behind a login with podcast and settings management. No feeds or workers yet.
 
 ## Layout
 
@@ -44,12 +44,15 @@ Logs are JSON lines on stdout.
 
 ## Admin UI
 
-Served at `/`: `/login`, then Dashboard, Podcasts, Episodes, Workers, Tasks and Settings (empty placeholders for now).
+Served at `/`: `/login`, then Dashboard, Podcasts, Episodes, Workers, Tasks and Settings. Podcasts and Settings are functional; the other pages are empty placeholders for now.
 
 - Session: signed cookie (HttpOnly, Secure, SameSite=Lax, 12 h). The `Secure` flag means the UI must be reached over HTTPS, i.e. through the reverse proxy. Logout removes the cookie; sessions are stateless, so changing `SESSION_SECRET` (or deleting `session_secret` from `settings`) invalidates all of them.
 - Failed logins: 1 s delay each, 5 failures within 15 min lock the client address out for 15 min (in memory, reset on restart).
 - CSRF: every state-changing admin request needs the session's token, as form field `csrf_token` or header `X-CSRF-Token` (set for htmx on `<body>`).
 - The client address comes from the proxy headers; the image trusts them from any peer (`FORWARDED_ALLOW_IPS=*`). That is only safe because no port is published – keep it that way, or restrict the variable to the proxy's address.
+- **Podcasts:** create, edit, pause/resume and delete (with a confirmation page). The ID (slug, lowercase letters, digits and single dashes) is part of the public feed URL and cannot be changed after creation. Scan interval, pacing and retention fields may be left empty to follow the defaults from Settings.
+- **Settings:** base URL (falls back to `BASE_URL`), default scan interval, pacing and retention, upload limit, task lease, escalation deadline, failure threshold and Telegram credentials. Changes apply immediately, no restart needed. The Telegram token is never sent back to the browser; leave the field empty to keep it. It is stored unencrypted in the database, so backups of `data/` contain it.
+- Input is validated on the server; on any error nothing is saved and the form is shown again with messages.
 - htmx is vendored in `server/app/static/` (no CDN, no build step).
 
 ## Database and migrations

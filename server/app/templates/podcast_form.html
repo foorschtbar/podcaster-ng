@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "_forms.html" import field %}
+{% block title %}{{ title }} – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>{{ title }}</h1>
+  {% if errors %}<p class="error" role="alert">Please fix the marked fields. Nothing was saved.</p>{% endif %}
+  <form method="post" action="{{ '/podcasts' if creating else '/podcasts/' ~ podcast_id }}" class="card">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+    {% if creating %}
+      {{ field('id', 'ID (slug)', v.id, errors.id, 'Part of the public feed URL; cannot be changed later. Lowercase letters, digits, dashes.', required=True) }}
+    {% else %}
+      <p class="muted small">ID (slug, fixed): <code>{{ podcast_id }}</code></p>
+    {% endif %}
+    {{ field('name', 'Name', v.name, errors.name, required=True) }}
+    <label>Description
+      <textarea name="description" rows="3">{{ v.description }}</textarea>
+      {% if errors.description %}<small class="error">Description {{ errors.description }}</small>{% endif %}
+    </label>
+    {{ field('playlist_url', 'Playlist URL', v.playlist_url, errors.playlist_url, required=True, type='url') }}
+    {{ field('image_url', 'Image URL', v.image_url, errors.image_url, type='url') }}
+    <label class="check"><input type="checkbox" name="active" value="1"{% if v.active %} checked{% endif %}> Active (scan this podcast)</label>
+
+    <h2>Scanning</h2>
+    {{ field('scan_interval_min', 'Scan interval (minutes)', v.scan_interval_min, errors.scan_interval_min, 'Empty: default (' ~ defaults.scan_interval_min ~ ').', numeric=True) }}
+    {{ field('scan_depth', 'Scan depth (latest videos)', v.scan_depth, errors.scan_depth, numeric=True, required=True) }}
+
+    <h2>Pacing</h2>
+    <p class="muted small">Empty fields use the defaults from Settings. A worker's own limit still caps these values.</p>
+    {{ field('pause_min_s', 'Pause between videos, min (seconds)', v.pause_min_s, errors.pause_min_s, 'Default: ' ~ defaults.pause_min_s, numeric=True) }}
+    {{ field('pause_max_s', 'Pause between videos, max (seconds)', v.pause_max_s, errors.pause_max_s, 'Default: ' ~ defaults.pause_max_s, numeric=True) }}
+    {{ field('downloads_per_hour', 'Downloads per worker and hour', v.downloads_per_hour, errors.downloads_per_hour, 'Default: ' ~ defaults.downloads_per_hour, numeric=True) }}
+
+    <h2>Retention</h2>
+    <p class="muted small">Stored now, applied by the cleanup job later. Empty fields use the defaults from Settings.</p>
+    {{ field('keep_last', 'Keep last episodes', v.keep_last, errors.keep_last, 'Default: ' ~ (defaults.keep_last or 'all'), numeric=True) }}
+    {{ field('max_age_days', 'Delete episodes older than (days)', v.max_age_days, errors.max_age_days, 'Default: ' ~ (defaults.max_age_days or 'no limit'), numeric=True) }}
+
+    <button type="submit">{{ 'Create podcast' if creating else 'Save' }}</button>
+  </form>
+  <p class="actions">
+    <a class="btn secondary" href="/podcasts">Cancel</a>
+    {% if not creating %}<a class="btn danger" href="/podcasts/{{ podcast_id }}/delete">Delete…</a>{% endif %}
+  </p>
+{% endblock %}

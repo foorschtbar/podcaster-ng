@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Delete podcast – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>Delete podcast?</h1>
+  <div class="card">
+    <p><strong>{{ p.name }}</strong> (<code>{{ p.id }}</code>) will be removed from the database.</p>
+    <p class="muted">Its public feed URL will stop working. This cannot be undone.</p>
+    <form method="post" action="/podcasts/{{ p.id }}/delete" class="actions">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+      <button type="submit" class="danger">Delete permanently</button>
+      <a class="btn secondary" href="/podcasts/{{ p.id }}">Cancel</a>
+    </form>
+  </div>
+{% endblock %}

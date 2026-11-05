@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Podcasts – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>Podcasts</h1>
+  {% if flash %}<p class="notice" role="status">{{ flash }}</p>{% endif %}
+  <p><a class="btn" href="/podcasts/new">New podcast</a></p>
+  {% if not podcasts %}<p class="muted">No podcasts yet.</p>{% endif %}
+  {% for p in podcasts %}
+  <article class="card item">
+    <div class="item-head">
+      <a href="/podcasts/{{ p.id }}"><strong>{{ p.name }}</strong></a>
+      <span class="badge {{ 'on' if p.active else 'off' }}">{{ 'active' if p.active else 'paused' }}</span>
+    </div>
+    <div class="muted small"><code>{{ p.id }}</code> · scan every {{ p.scan_interval_min or defaults.scan_interval_min }} min · last {{ p.scan_depth }} videos</div>
+    <div class="actions">
+      <a class="btn secondary" href="/podcasts/{{ p.id }}">Edit</a>
+      <form method="post" action="/podcasts/{{ p.id }}/{{ 'pause' if p.active else 'resume' }}">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+        <button type="submit" class="secondary">{{ 'Pause' if p.active else 'Resume' }}</button>
+      </form>
+    </div>
+  </article>
+  {% endfor %}
+{% endblock %}

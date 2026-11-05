@@ -1,0 +1,9 @@
+{% macro field(name, label, value='', error=None, hint='', placeholder='', required=False, readonly=False, numeric=False, type='text') -%}
+<label>{{ label }}{% if required %} *{% endif %}
+  <input name="{{ name }}" type="{{ type }}" value="{{ value }}"{% if numeric %} inputmode="numeric"{% endif %}
+         {% if placeholder != '' %}placeholder="{{ placeholder }}"{% endif %}{% if readonly %} readonly{% endif %}
+         {% if error %} aria-invalid="true"{% endif %} autocomplete="off">
+  {% if hint %}<small class="muted">{{ hint }}</small>{% endif %}
+  {% if error %}<small class="error">{{ label }} {{ error }}</small>{% endif %}
+</label>
+{%- endmacro %}

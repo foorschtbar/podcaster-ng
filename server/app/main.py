@@ -9,11 +9,12 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .admin import CsrfError, LoginRequired, NotConfigured, locked_response, router as admin_router
 from .auth import LoginLimiter, load_session_secret
 from .config import Config
 from .db import connect
 from .migrations import migrate
+from .routes import router as admin_router
+from .web import CsrfError, LoginRequired, NotConfigured, locked_response
 
 log = logging.getLogger(__name__)
 

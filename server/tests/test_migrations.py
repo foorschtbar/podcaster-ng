@@ -3,7 +3,10 @@ import sqlite3
 import pytest
 
 from app.db import connect
-from app.migrations import DEFAULT_DIR, MigrationError, current_version, migrate
+from app.migrations import DEFAULT_DIR, MigrationError, current_version, discover, migrate
+
+LATEST = discover(DEFAULT_DIR)[-1][0]
+ALL = list(range(1, LATEST + 1))
 
 
 @pytest.fixture
@@ -39,12 +42,12 @@ def test_connection_pragmas(paths):
 
 def test_fresh_database(paths):
     db, backups = paths
-    assert migrate(db, backups) == 1
-    assert versions(db) == [1]
+    assert migrate(db, backups) == LATEST
+    assert versions(db) == ALL
     conn = connect(db)
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
-    assert {"schema_migrations", "settings"} <= tables
+    assert {"schema_migrations", "settings", "podcasts"} <= tables
     assert not backups.exists()  # nothing to back up for a new database
 
 
@@ -54,11 +57,11 @@ def test_second_start_does_not_reapply(paths):
     conn = connect(db)
     applied = conn.execute("SELECT applied_at FROM schema_migrations").fetchone()[0]
     conn.close()
-    assert migrate(db, backups) == 1
+    assert migrate(db, backups) == LATEST
     conn = connect(db)
     assert conn.execute("SELECT applied_at FROM schema_migrations").fetchone()[0] == applied
     conn.close()
-    assert versions(db) == [1]
+    assert versions(db) == ALL
     assert not backups.exists()
 
 
@@ -106,5 +109,5 @@ def test_newer_database_is_refused(paths):
     conn.close()
     with pytest.raises(MigrationError, match="newer than this code"):
         migrate(db, backups)
-    assert versions(db) == [1, 99]
+    assert versions(db) == [*ALL, 99]
     assert not backups.exists()

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_forms.html" import field %}
+{% block title %}Settings – PodcasterNG{% endblock %}
+{% block content %}
+  <h1>Settings</h1>
+  {% if flash %}<p class="notice" role="status">{{ flash }}</p>{% endif %}
+  {% if errors %}<p class="error" role="alert">Please fix the marked fields. Nothing was saved.</p>{% endif %}
+  <form method="post" action="/settings" class="card">
+    <input type="hidden" name="csrf_token" value="{{ session.csrf }}">
+    {% for group, fields in groups %}
+      <h2>{{ group }}</h2>
+      {% for f in fields %}
+        {% if f.kind == 'secret' %}
+          <label>{{ f.label }}
+            <input name="{{ f.key }}" type="password" value="" autocomplete="new-password"
+                   placeholder="{{ 'set – leave empty to keep' if secrets_set[f.key] else 'not set' }}"
+                   {% if errors[f.key] %} aria-invalid="true"{% endif %}>
+            {% if errors[f.key] %}<small class="error">{{ f.label }} {{ errors[f.key] }}</small>{% endif %}
+          </label>
+          {% if secrets_set[f.key] %}
+          <label class="check"><input type="checkbox" name="clear_{{ f.key }}" value="1"> Remove stored {{ f.label|lower }}</label>
+          {% endif %}
+        {% else %}
+          {{ field(f.key, f.label ~ (' (' ~ f.unit ~ ')' if f.unit else ''), v[f.key], errors[f.key], f.hint,
+                   numeric=(f.kind == 'int')) }}
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+    <button type="submit">Save settings</button>
+  </form>
+{% endblock %}

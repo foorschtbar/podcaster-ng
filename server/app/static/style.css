@@ -64,3 +64,31 @@ button.link { background: none; color: var(--accent); padding: .4rem; }
   .tabs a[aria-current="page"] { box-shadow: inset 3px 0 0 var(--accent); }
   body > main:not(.narrow) { margin-left: 11rem; max-width: none; padding-bottom: 1.5rem; }
 }
+
+/* forms, lists, buttons */
+h2 { font-size: 1.05rem; margin: 1.5rem 0 .75rem; }
+.small { font-size: .85rem; }
+.notice { background: var(--card); border: 1px solid var(--accent); border-radius: .4rem; padding: .6rem .8rem; }
+small { display: block; margin-top: .25rem; }
+textarea {
+  display: block; width: 100%; margin-top: .25rem; padding: .65rem .7rem; font: inherit; resize: vertical;
+  color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: .4rem;
+}
+input[aria-invalid="true"] { border-color: var(--error); }
+label.check { display: flex; gap: .6rem; align-items: center; color: var(--fg); }
+label.check input { width: auto; margin: 0; }
+.btn {
+  display: inline-block; font: inherit; text-decoration: none; cursor: pointer; border: 0; border-radius: .4rem;
+  padding: .65rem 1rem; background: var(--accent); color: var(--accent-fg);
+}
+.btn.secondary, button.secondary { background: none; color: var(--accent); border: 1px solid var(--line); }
+.btn.danger, button.danger { background: var(--error); color: var(--bg); border: 0; }
+.card button[type=submit]:not(.secondary):not(.danger) { margin-top: .5rem; }
+.item { margin-bottom: .75rem; }
+.item-head { display: flex; justify-content: space-between; gap: .5rem; align-items: baseline; }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0 0; align-items: center; }
+.actions form { margin: 0; }
+.card .actions button { width: auto; }
+.badge { font-size: .75rem; padding: .1rem .5rem; border-radius: 1rem; border: 1px solid var(--line); white-space: nowrap; }
+.badge.on { color: var(--accent); border-color: var(--accent); }
+.badge.off { color: var(--muted); }
