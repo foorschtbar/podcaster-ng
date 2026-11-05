@@ -1,6 +1,7 @@
 """Pure ASGI middleware (no response buffering, so large downloads stream straight through)."""
 
 import logging
+import re
 
 from starlette.concurrency import run_in_threadpool
 
@@ -9,6 +10,7 @@ from .db import connect
 
 log = logging.getLogger(__name__)
 
+UPLOAD_PATH = re.compile(r"^/api/worker/tasks/\d+/upload$")
 ADMIN_HEADERS = {
     "Cache-Control": "no-store",
     "X-Frame-Options": "DENY",
@@ -39,6 +41,57 @@ class SecurityHeaders:
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
+
+
+class BodyTooLarge(Exception):
+    pass
+
+
+class BodyLimit:
+    """Rejects oversized request bodies (413) everywhere except the worker upload, which has its own per-file limits.
+
+    Forms, JSON and logins are tiny; this stops anyone from making the server read gigabytes into memory.
+    """
+
+    def __init__(self, app, limit: int = 1 << 20):
+        self.app, self.limit = app, limit
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or UPLOAD_PATH.match(scope["path"]):
+            return await self.app(scope, receive, send)
+        declared = dict(scope["headers"]).get(b"content-length", b"0")
+        if declared.isdigit() and int(declared) > self.limit:
+            return await self._reject(send)
+        seen, started = 0, False
+
+        async def counting_receive():
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > self.limit:
+                    raise BodyTooLarge
+            return message
+
+        async def tracking_send(message):
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, counting_receive, tracking_send)
+        except BodyTooLarge:
+            if started:
+                raise
+            await self._reject(send)
+
+    @staticmethod
+    async def _reject(send):
+        body = b"Request body too large\n"
+        await send({"type": "http.response.start", "status": 413, "headers": [
+            (b"content-type", b"text/plain; charset=utf-8"), (b"content-length", str(len(body)).encode()),
+            (b"connection", b"close")]})
+        await send({"type": "http.response.body", "body": body})
 
 
 class HitCounter:

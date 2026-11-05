@@ -31,6 +31,15 @@ services:
       # Mount only what is needed (its config and its downloads), not the whole project.
       # - /path/to/old-podcaster/config.yml:/import/podcaster/config.yml:ro
       # - /path/to/old-podcaster/data/downloads:/import/podcaster/data/downloads:ro
+    # Hardening: read-only root filesystem (only /data and /tmp are writable), no extra privileges, limits.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 200
     networks:
       - internal   # lets the optional local worker reach http://server:8080
     # For a local trial without a reverse proxy (the Secure session cookie then needs https, so this
@@ -67,11 +76,26 @@ services:
       - WORKER_TOKEN=${WORKER_TOKEN:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       # Optional: YTDLP_PROXY=http://vpn-proxy:3128 (only yt-dlp uses it), YTDLP_COOKIES=/run/cookies.txt
+    # Hardening: read-only root filesystem, /work (a volume) holds the files of the running task.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    volumes:
+      - worker-work:/work
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 256
     networks:
       - internal
     depends_on:
       server:
         condition: service_healthy
+
+volumes:
+  worker-work: {}
 
 networks:
   internal: {}

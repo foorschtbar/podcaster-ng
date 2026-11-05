@@ -1,0 +1,37 @@
+# Standalone worker for another machine (a PC or Raspberry Pi at home). It only needs to reach the server over
+# https; no port is opened on this machine.
+#
+#   cp compose.worker.example.yml compose.worker.yml     # private copy, ignored by git
+#   cp worker.env.example worker.env                      # SERVER_URL and WORKER_TOKEN (create the worker in the admin UI)
+#   docker login ghcr.io                                  # only if the package is private: user + token with read:packages
+#   docker compose -f compose.worker.yml pull && docker compose -f compose.worker.yml up -d
+#
+# The image is built by the GitHub Actions workflow of the repository. To build it yourself instead, replace
+# "image:" by the build block in compose.example.yml. Set the worker's tier (2 = used when the server's own IP is
+# blocked) and a conservative pacing in the admin UI (Workers). Update (new yt-dlp): pull again and "up -d".
+
+name: podcaster-ng-worker
+
+services:
+  worker:
+    image: ghcr.io/foorschtbar/podcaster-ng-worker:latest
+    pull_policy: always
+    container_name: podcaster-ng-worker-home
+    restart: unless-stopped
+    env_file: worker.env
+    # Optional: YTDLP_PROXY=http://..., YTDLP_COOKIES=/run/cookies.txt (mount the file read-only below)
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    volumes:
+      - worker-work:/work
+      # - ./cookies.txt:/run/cookies.txt:ro
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 256
+
+volumes:
+  worker-work: {}

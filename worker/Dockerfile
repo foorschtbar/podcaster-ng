@@ -16,8 +16,12 @@ RUN pip install -r requirements.txt
 COPY shared/pn_shared ./pn_shared
 COPY worker/pn_worker ./pn_worker
 
-RUN useradd -u 1000 -m -s /usr/sbin/nologin worker && mkdir /tmp/pn-work && chown worker /tmp/pn-work
+# /work holds the files of the running task; mount a volume there (an empty named volume inherits this owner).
+# HOME and DENO_DIR point to /tmp so the container also runs with a read-only root filesystem.
+RUN useradd -u 1000 -m -s /usr/sbin/nologin worker && mkdir /work /tmp/pn-work && chown worker /work /tmp/pn-work
+ENV HOME=/tmp DENO_DIR=/tmp/deno WORK_DIR=/work
 USER worker
+VOLUME /work
 
 # The worker touches this file on every loop iteration, also while the server is down (backoff <= 60 s).
 HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \

@@ -8,3 +8,6 @@
 .env
 __pycache__/
 .pytest_cache/
+/compose.worker.yml
+/worker.env
+/cookies.txt

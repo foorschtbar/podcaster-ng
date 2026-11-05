@@ -8,11 +8,12 @@ Turns YouTube playlists into podcast feeds. The **server** coordinates and serve
 
 | Path | Content |
 |---|---|
-| `scripts/` | `compare_feeds.py` |
+| `scripts/` | `compare_feeds.py`, `restore_db.py` |
 | `shared/` | `pn_shared`: worker API schemas (Pydantic) and logging, used by server and worker |
 | `worker/` | `pn_worker`: the worker (hello, ping, backoff) and its Dockerfile |
 | `server/` | Python package `app` (FastAPI), `migrations/`, tests, Dockerfile |
 | `compose.example.yml` | template for `compose.yml`: server, optional worker, data bind mount `./data` |
+| `compose.worker.example.yml`, `worker.env.example` | templates for a standalone worker on another machine |
 | `compose.yml` | your private copy (git-ignored): domain, resolver, mounts |
 | `.env.example` | supported environment variables |
 
@@ -58,7 +59,7 @@ Files live in `data/media/<podcast-id>/`, file names as in the old project. Feed
 
 ## Workers
 
-A worker is a separate process (later with yt-dlp, ffmpeg and deno) that can run on any network and only needs outbound HTTPS to the server.
+A worker is a separate process (yt-dlp, ffmpeg and deno) that can run on any network and only needs outbound HTTPS to the server.
 
 1. In the admin UI open **Workers → New worker** (name, tier, optional pacing limits). The token (`pnw_…`, 32 random bytes) is shown **once**, in the response to the creation; the server stores only its SHA-256 hash. *Regenerate token* invalidates the old one at once; *Delete* revokes it.
 2. Start the worker with the token:
@@ -187,7 +188,7 @@ python3 scripts/compare_feeds.py https://old.example.org https://new.example.org
 
 ## Admin UI
 
-Served at `/`: `/login`, then Dashboard, Podcasts, Episodes, Workers, Tasks and Settings. Podcasts and Settings are functional; the other pages are empty placeholders for now.
+Served at `/`: `/login`, then Dashboard, Podcasts, Episodes, Workers, Tasks and Settings (plus Retention under Episodes).
 
 - Session: signed cookie (HttpOnly, Secure, SameSite=Lax, 12 h). The `Secure` flag means the UI must be reached over HTTPS, i.e. through the reverse proxy. Logout removes the cookie; sessions are stateless, so changing `SESSION_SECRET` (or deleting `session_secret` from `settings`) invalidates all of them.
 - Failed logins: 1 s delay each, 5 failures within 15 min lock the client address out for 15 min (in memory, reset on restart).
@@ -197,6 +198,57 @@ Served at `/`: `/login`, then Dashboard, Podcasts, Episodes, Workers, Tasks and 
 - **Settings:** base URL (falls back to `BASE_URL`), default scan interval, pacing and retention, upload limit, task lease, escalation deadline, failure threshold and Telegram credentials. Changes apply immediately, no restart needed. The Telegram token is never sent back to the browser; leave the field empty to keep it. It is stored unencrypted in the database, so backups of `data/` contain it.
 - Input is validated on the server; on any error nothing is saved and the form is shown again with messages.
 - htmx is vendored in `server/app/static/` (no CDN, no build step).
+
+## Operations
+
+### Layout of a deployment
+
+- **Server host:** `compose.yml` (copy of `compose.example.yml`) runs the server behind your reverse proxy, optionally with a local worker (`docker compose --profile worker up -d worker`, `WORKER_TOKEN` in `.env`).
+- **Home worker:** on any other machine copy `compose.worker.example.yml` to `compose.worker.yml` and `worker.env.example` to `worker.env` (`SERVER_URL`, `WORKER_TOKEN`), then `docker compose -f compose.worker.yml pull && docker compose -f compose.worker.yml up -d` (the image comes from the container registry, see *Images* below). No port is opened. In the admin UI give it a higher tier than the local worker (tier 2 is only used when tier 1 fails or is offline) and a conservative pacing (for example 2 downloads per hour, 30–120 s pause). Check it with *Retry now* on a task that was blocked on the server's IP.
+- Containers run as a non-root user with a read-only root filesystem, all capabilities dropped and `no-new-privileges`; the server may write only `/data` and `/tmp`, the worker `/work` (a volume) and `/tmp`. The worker has memory, CPU and process limits (`mem_limit`, `cpus`, `pids_limit`), the server a memory and process limit. Adapt them in your `compose.yml`.
+
+### Limits and timeouts
+
+Every outgoing call has a timeout (worker to server 10/20 s, uploads up to 10 min, Telegram 10/15 s, yt-dlp socket 30 s and a hard limit per scan and per download task). The server refuses request bodies over 1 MiB (413) everywhere except the worker upload, which is limited per file role (audio: *Upload size limit* in Settings, default 1024 MB; images and metadata a few MB). **The reverse proxy must allow at least that body size** for `/api/worker/tasks/*/upload`; keep the setting at or below the proxy's limit.
+
+### Backups
+
+- The server writes a consistent copy of the database every day after the configured time (Settings → Backups, default 02:30 UTC) to `data/backups/daily/podcaster-YYYYMMDD.db`, using the SQLite backup API (safe while the server writes). Each copy is checked (`PRAGMA integrity_check`) before it replaces the temporary file; the newest 14 are kept. A failed backup sends a Telegram message. Migrations additionally copy the database to `data/backups/` before they run.
+- Include `data/` in your regular host backup (database, `media/` and `backups/`). `data/staging/` holds only unfinished uploads and may be excluded. The settings table contains the Telegram bot token, so protect the backups.
+- **Check a backup:** `python3 scripts/restore_db.py --check data/backups/daily/podcaster-20261105.db` prints its schema version and row counts.
+- **Restore:** stop the server (`docker compose stop server`), then
+  `python3 scripts/restore_db.py data/backups/daily/podcaster-20261105.db data/` and `docker compose start server`. The script verifies the copy, moves the current database aside as `podcaster.db.before-restore-<time>` (nothing is deleted) and puts the copy in place. Media files are not part of the database copy; restore `data/media/` from the host backup. A backup of an older version is migrated at the next start.
+- Try the restore once on a scratch directory before you need it (`mkdir /tmp/rt && cp -r data/backups /tmp/rt/ && python3 scripts/restore_db.py --check …`, then restore into `/tmp/rt`).
+
+### Images (GitHub Actions)
+
+`.github/workflows/build.yml` runs the tests and then builds `podcaster-ng-server` and `podcaster-ng-worker` for amd64 and arm64 and pushes them to `ghcr.io/<owner>/…`: pushes to `master` give the tags `latest` and `sha-<commit>`, a tag `v1.2.3` gives `1.2.3`; pull requests only build. Run it by hand from the Actions tab (*Run workflow*) to rebuild with fresh base images. A machine that should pull a private package needs `docker login ghcr.io` once with a GitHub personal access token that has `read:packages` (or make the package public in its settings). To use the server image instead of building it locally, replace `build:` by `image: ghcr.io/<owner>/podcaster-ng-server:latest` in your `compose.yml`.
+
+### Upgrades
+
+```bash
+git pull
+docker compose build            # add --pull to refresh the base images
+docker compose up -d            # migrations run at startup, after a copy of the database
+docker compose ps               # wait for "healthy"
+```
+
+To go back, check out the previous version, rebuild and restore the database copy from `data/backups/` made before the migration (the server refuses a database that is newer than its code).
+
+### Keeping yt-dlp current
+
+yt-dlp ages quickly. The worker image pins its versions in `worker/requirements.txt`; the version in use is shown per worker under Workers. To update: change the `yt-dlp` pin there (and `deno` if needed), then on every worker host `docker compose build --pull worker && docker compose up -d worker` (home worker: `docker compose -f compose.worker.yml pull && docker compose -f compose.worker.yml up -d`, after the new image was built by the pipeline). Do it when downloads start failing with `internal` errors, or monthly.
+
+### Logs
+
+JSON lines on stdout. Tokens, cookies and passwords are not logged: the Telegram client keeps the bot token out of URLs in errors and log lines, worker error texts are scrubbed before they are stored, and the access log contains no headers or bodies.
+
+### Rollout and cut-over from the old Podcaster
+
+1. **Parallel phase.** Run PodcasterNG under its own host name, import the old data (Settings → Import assistant) and compare: `python3 scripts/compare_feeds.py https://old.example.org https://new.example.org abgt asot` must report identical items, GUIDs, enclosure URLs and lengths. While comparing, keep the old project as the only one that downloads: leave the PodcasterNG workers stopped (scan and download tasks then simply wait in the queue).
+2. **Enable PodcasterNG downloads.** Start the workers and check a manually triggered download (*Retry now*) of a video the server's IP could not fetch; it must appear in the feed with the same file naming.
+3. **Cut-over.** Stop the old container (leave its config, archive and data untouched), point the reverse proxy router of the public host name at PodcasterNG and set *Base URL* to that host name. Verify in a podcast app that the subscription still works and shows no duplicate episodes, and watch the hit counters on the dashboard.
+4. **Fallback.** Keep the old stack stopped but intact for a week. To go back: point the router at the old container again and start it (`docker compose up -d` in its directory); feeds are served again as soon as the container is up. Because the GUIDs and file URLs are identical, apps do not notice.
 
 ## Database and migrations
 

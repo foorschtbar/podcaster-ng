@@ -7,7 +7,7 @@ from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
 
-from . import notifications, queue, retention, settings, watchdog
+from . import backup, notifications, queue, retention, settings, watchdog
 from .db import connect
 
 log = logging.getLogger(__name__)
@@ -16,7 +16,8 @@ STARTED = datetime.now(timezone.utc)
 
 
 def tick(db_path: Path, env_defaults: dict | None = None, transport=None, now: datetime | None = None,
-         started_at: datetime | None = None, media_dir: Path | None = None) -> dict:
+         started_at: datetime | None = None, media_dir: Path | None = None,
+         backup_dir: Path | None = None) -> dict:
     """One scheduler pass (also callable from tests)."""
     now = now or queue.utcnow()
     conn = connect(db_path)
@@ -43,16 +44,32 @@ def tick(db_path: Path, env_defaults: dict | None = None, transport=None, now: d
         log.info("Created %d scan task(s)", len(created))
     if reopened:
         log.info("Reopened %d paused task(s)", reopened)
+    saved = None
+    if backup_dir is not None:
+        try:
+            saved = backup.run_daily(db_path, backup_dir, env_defaults, now)
+        except Exception:  # noqa: BLE001 - reported loudly, but leases and scans must go on
+            log.exception("The daily database backup failed")
+            _alert_backup_failed(db_path, now)
     return {"expired": expired, "scans_created": len(created), "reopened": reopened, "escalated": escalated,
-            "alerts": alerts, "messages": sent, "retention": cleaned}
+            "alerts": alerts, "messages": sent, "retention": cleaned, "backup": saved}
+
+
+def _alert_backup_failed(db_path: Path, now: datetime) -> None:
+    conn = connect(db_path)
+    try:
+        notifications.enqueue(conn, "backup_failed", f"backup_failed:{now:%Y%m%d}",
+                              "⚠️ PodcasterNG: the daily database backup failed. Check the server log.", now)
+    finally:
+        conn.close()
 
 
 async def scheduler_loop(db_path: Path, interval: float, env_defaults: dict | None = None, transport=None,
-                         media_dir: Path | None = None) -> None:
+                         media_dir: Path | None = None, backup_dir: Path | None = None) -> None:
     await asyncio.sleep(min(FIRST_TICK_DELAY, interval))
     while True:
         try:
-            await run_in_threadpool(tick, db_path, env_defaults, transport, None, None, media_dir)
+            await run_in_threadpool(tick, db_path, env_defaults, transport, None, None, media_dir, backup_dir)
         except Exception:  # noqa: BLE001 - the scheduler must never die
             log.exception("Scheduler tick failed")
         await asyncio.sleep(interval)

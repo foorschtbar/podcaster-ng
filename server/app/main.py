@@ -16,7 +16,7 @@ from .auth import LoginLimiter, RateLimiter, load_session_secret
 from .config import Config
 from .importer import ImportJob
 from .db import connect
-from .middleware import HitCounter, SecurityHeaders
+from .middleware import BodyLimit, HitCounter, SecurityHeaders
 from .migrations import migrate
 from .public import router as public_router
 from .routes import router as admin_router
@@ -45,7 +45,7 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
         if config.run_scheduler:
             background.append(asyncio.create_task(scheduler_loop(
                 config.db_path, config.scheduler_tick_seconds, {"base_url": config.base_url}, telegram_transport,
-                config.media_dir)))
+                config.media_dir, config.backup_dir)))
         try:
             yield
         finally:
@@ -98,5 +98,6 @@ def create_app(config: Config | None = None, limiter: LoginLimiter | None = None
     app.include_router(admin_router)
     # Outermost last: the hit counter sees every request, the security headers every response.
     app.add_middleware(HitCounter, db_path=config.db_path)
+    app.add_middleware(BodyLimit)
     app.add_middleware(SecurityHeaders)
     return app
