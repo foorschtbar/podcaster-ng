@@ -240,3 +240,30 @@ def test_redact_filter_scrubs_secrets():
     rec = logging.LogRecord("x", logging.INFO, "p", 1, "token is %s here", ("pnw_secret",), None)
     f.filter(rec)
     assert rec.getMessage() == "token is *** here"
+
+
+def test_loop_reports_dropped_tasks_with_the_next_claim(tmp_path, monkeypatch):
+    """A task whose result could not be delivered is announced to the server at the next successful claim, once."""
+    from types import SimpleNamespace
+    import pn_worker.main as main
+
+    claims, outcomes = [], iter([False, True, True])
+
+    class Client(FakeClient):
+        def claim(self, request):
+            claims.append(list(request.dropped))
+            return SimpleNamespace(task=SimpleNamespace(id=7 + len(claims), type="scan"), retry_after_seconds=1)
+
+    monkeypatch.setattr(main, "run_task", lambda client, task, config: next(outcomes))
+    stop, sleeps = threading.Event(), []
+    monkeypatch.setattr(main, "hello_request", lambda found=None: None)
+    client = Client([])
+    config = Config(server_url="https://x", token="pnw_t", alive_file=str(tmp_path / "alive"))
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 4:
+            stop.set()
+
+    run(config, stop, client=client, sleep=fake_sleep, found={"ytdlp": "1"})
+    assert claims[:3] == [[], [8], []]                      # task 8 was dropped, told once, then forgotten
